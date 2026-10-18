@@ -665,8 +665,9 @@ export class GalaxyRenderer {
 
     this.rig.update(now);
     this.updateFlight(now);
-    if (this.renderView === 'system') this.systemView?.updateFrame(this.elapsed, this.rig.camera, this.height);
-    else if (this.renderView === 'planet') this.planetView?.updateFrame(this.elapsed);
+    if (this.renderView === 'system') {
+      this.systemView?.updateFrame(this.elapsed, this.rig.camera, this.width, this.height);
+    } else if (this.renderView === 'planet') this.planetView?.updateFrame(this.elapsed);
     this.updateMarkers();
 
     const scene = this.sceneFor(this.renderView) ?? this.emptyScene;

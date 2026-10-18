@@ -29,17 +29,21 @@ import { moonPositionKm, orbitalPeriodDays, positionAtAU } from '../sim/orbit';
 import type { CameraPose } from './camera';
 import { directionFromAngles } from './camera';
 import type { PickTarget, WorldPickable } from './api';
-import { screenRadiusPx } from './pick';
+import { projectToScreen, screenRadiusPx } from './pick';
 import {
   BELT_BODY_MAX_PX,
   BELT_BODY_MIN_PX,
   MAX_BELT_BODIES,
-  MAX_PLANET_SCALE,
+  MAX_PLANET_RADIUS_PX,
   MIN_PLANET_RADIUS_PX,
   MIN_STAR_CORONA_PX,
   MIN_STAR_PHOTOSPHERE_PX,
+  PLANET_OVERLAP_GAP_PX,
+  RING_DRAWN_MAX,
+  RING_DRAWN_MIN,
   SYSTEM_FRAME_MARGIN,
   clampVisualRadii,
+  drawnRingRadii,
   exaggeratedRadiusAU,
   moonOrbitVisualAU,
   moonVisualRadiusAU,
@@ -52,9 +56,6 @@ import { AFFORDANCE, linear } from './palette';
 import { mulberry32, TAU } from './rand';
 
 const ORBIT_SEGMENTS = 160;
-
-/** Upper bound on a drawn planet's screen radius: a world, not a wall. */
-const MAX_PLANET_RADIUS_PX = 26;
 
 const BELT_VERT = /* glsl */ `
 attribute vec3 aColor;
@@ -121,6 +122,20 @@ interface BeltRecord {
   readonly meanMotion: number;
 }
 
+/** One planet's screen-space drawing for the current frame. */
+interface SizedPlanet {
+  readonly record: PlanetRecord;
+  readonly basePx: number;
+  /** Drawn radius after all corrections, CSS px. */
+  px: number;
+  /** Drawn ring outer radius in planet radii (1 when there are no rings). */
+  ringCap: number;
+  readonly ringFloor: number;
+  readonly x: number;
+  readonly y: number;
+  readonly visible: boolean;
+}
+
 function emptyOrbitGeometry(): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ORBIT_SEGMENTS * 3), 3));
@@ -143,6 +158,8 @@ export class SystemView {
   private readonly belts: BeltRecord[] = [];
   private readonly geometryDisposals: THREE.BufferGeometry[] = [];
   private readonly materialDisposals: THREE.Material[] = [];
+  private readonly forward = new THREE.Vector3();
+  private readonly toBody = new THREE.Vector3();
 
   constructor(system: StarSystem, timeDays: number, dpr: number) {
     this.system = system;
@@ -222,7 +239,7 @@ export class SystemView {
       const sortedMoons = [...planet.moons].sort((a, b) => a.orbit.radiusKm - b.orbit.radiusKm);
       sortedMoons.forEach((moon, rank) => {
         const orbitAU = moonOrbitVisualAU(radiusAU, rank, sortedMoons.length);
-        const moonRadiusAU = moonVisualRadiusAU(moon.radiusKm, orbitAU);
+        const moonRadiusAU = moonVisualRadiusAU(moon.radiusKm, radiusAU, orbitAU);
         const moonVisual = new WorldVisual({
           surface: moon.surface,
           radius: moonRadiusAU,
@@ -416,27 +433,36 @@ export class SystemView {
   }
 
   /**
-   * Per-frame look updates: the star's screen-size floor, every world's screen-size
-   * floor and lighting. The camera is passed in because a minimum *pixel* size is
-   * meaningless without knowing the projection.
+   * Per-frame look updates: the star's screen-size floor, every world's drawn screen
+   * size (floor, ceiling and no-overlap), and lighting.
+   *
+   * **Sizes are solved in screen space, every frame.** The old rule clamped a radius in
+   * AU and then scaled it by at most 3×, so in a wide-span system (an M dwarf with a
+   * 97:1 span) a clamped gas giant still drew at 34 px while a neighbour drew at 5 px,
+   * and the two collided. Here the drawing is bounded in pixels (5.5-14 px), rings are
+   * compressed before a planet is, and any pair that still collides is shrunk about its
+   * own centre. Positions never move: a body rides the orbit the generator wrote.
    */
-  updateFrame(timeSeconds: number, camera: THREE.PerspectiveCamera, heightPx: number): void {
+  updateFrame(
+    timeSeconds: number,
+    camera: THREE.PerspectiveCamera,
+    widthPx: number,
+    heightPx: number,
+  ): void {
     this.star.update(timeSeconds);
+    // Screen-space maths needs the camera's CURRENT matrices; the renderer updates them
+    // at draw time, which is after this call. Without this, every screen position would
+    // be one frame stale and the overlap test would lag the drawing.
+    camera.updateMatrixWorld(true);
 
     const worldPerPixel = this.worldPerPixel(camera, heightPx, this.starPosition);
     this.star.setScreenSize(worldPerPixel, MIN_STAR_PHOTOSPHERE_PX, MIN_STAR_CORONA_PX);
 
+    this.applyPlanetScreenSizes(camera, widthPx, heightPx);
+    this.applyMoonScreenSizes();
+
     const starDir = new THREE.Vector3();
     for (const record of this.planets) {
-      // Screen-size floor for the world: findable, and never larger than a wall. The
-      // scale is computed from the *generated* radius every frame (never from the last
-      // frame's scale), or the size would oscillate.
-      const pxBase = screenRadiusPx(camera, record.position, record.radiusAU, heightPx);
-      if (pxBase > 0) {
-        const wanted = Math.min(Math.max(pxBase, MIN_PLANET_RADIUS_PX), MAX_PLANET_RADIUS_PX);
-        const scale = Math.min(Math.max(wanted / pxBase, 1 / MAX_PLANET_SCALE), MAX_PLANET_SCALE);
-        if (Math.abs(scale - record.visual.scale) > 0.002) record.visual.setScale(scale);
-      }
       starDir.copy(record.position).multiplyScalar(-1).normalize();
       record.visual.update(record.position, starDir, this.starColor, 1.2, timeSeconds);
       for (const moonRecord of record.moons) {
@@ -446,11 +472,138 @@ export class SystemView {
     }
   }
 
+  /** Bounded, non-overlapping drawn planet radii (and ring caps) for this frame. */
+  private applyPlanetScreenSizes(
+    camera: THREE.PerspectiveCamera,
+    widthPx: number,
+    heightPx: number,
+  ): void {
+    const width = Math.max(widthPx, 1);
+    const height = Math.max(heightPx, 1);
+    const sizes: SizedPlanet[] = this.planets.map((record) => {
+      const basePx = screenRadiusPx(camera, record.position, record.radiusAU, height);
+      const wanted = Math.min(Math.max(basePx, MIN_PLANET_RADIUS_PX), MAX_PLANET_RADIUS_PX);
+      // No cap on the upward correction: reaching the floor is the point. Downward
+      // correction (the ceiling) is likewise unclamped.
+      const correction = basePx > 0 ? wanted / basePx : 1;
+      const screen = projectToScreen(camera, record.position, width, height);
+      const drawnRing = record.planet.rings
+        ? drawnRingRadii(
+            record.planet.rings.innerRadiusKm / Math.max(record.planet.radiusKm, 1),
+            record.planet.rings.outerRadiusKm / Math.max(record.planet.radiusKm, 1),
+            RING_DRAWN_MAX,
+          )
+        : { inner: 0, outer: 1 };
+      return {
+        record,
+        basePx,
+        px: Math.max(basePx * correction, 0.01),
+        ringCap: drawnRing.outer,
+        ringFloor: record.planet.rings ? RING_DRAWN_MIN : 1,
+        x: screen.x,
+        y: screen.y,
+        visible: screen.visible && basePx > 0,
+      };
+    });
+
+    this.resolvePlanetOverlaps(sizes);
+
+    for (const size of sizes) {
+      const correction = size.basePx > 0 ? size.px / size.basePx : 1;
+      if (Math.abs(correction - size.record.visual.scale) > 0.002) {
+        size.record.visual.setScale(correction);
+      }
+      if (size.record.planet.rings) size.record.visual.setRingCap(size.ringCap);
+    }
+  }
+
+  /**
+   * No two drawn planets may overlap — disc or ring — on screen.
+   *
+   * Rings are compressed first, because a ring is an exaggeration and a world is the
+   * subject; only when both rings are at their narrowest does the solver shrink the
+   * discs. It never moves a body. The 1.5 px gap keeps a pixel row of sky between two
+   * worlds, so the result reads as a system rather than a collision.
+   */
+  private resolvePlanetOverlaps(sizes: readonly SizedPlanet[]): void {
+    const gap = PLANET_OVERLAP_GAP_PX;
+    for (let pass = 0; pass < 6; pass += 1) {
+      let changed = false;
+      for (let i = 0; i < sizes.length; i += 1) {
+        const a = sizes[i]!;
+        if (!a.visible) continue;
+        for (let j = i + 1; j < sizes.length; j += 1) {
+          const b = sizes[j]!;
+          if (!b.visible) continue;
+          const distance = Math.hypot(a.x - b.x, a.y - b.y);
+          const footprint = a.ringCap * a.px + b.ringCap * b.px;
+          if (footprint + gap <= distance) continue;
+          changed = true;
+          const target = Math.max(distance - gap, 0);
+
+          // 1) compress the ring annuli toward their narrowest drawn width.
+          const ringExcessA = Math.max(0, (a.ringCap - a.ringFloor) * a.px);
+          const ringExcessB = Math.max(0, (b.ringCap - b.ringFloor) * b.px);
+          const ringExcess = ringExcessA + ringExcessB;
+          const over = footprint - target;
+          if (ringExcess > 0 && over > 0) {
+            const keep = 1 - Math.min(over, ringExcess) / ringExcess;
+            if (ringExcessA > 0) a.ringCap = a.ringFloor + (a.ringCap - a.ringFloor) * keep;
+            if (ringExcessB > 0) b.ringCap = b.ringFloor + (b.ringCap - b.ringFloor) * keep;
+          }
+
+          // 2) if the rings alone cannot make room, shrink both discs — but never below
+          //    the findability floor. When two centres are within the sum of their
+          //    floors, no drawing can separate them: that pair is a line-of-sight
+          //    conjunction, and depth testing decides which world is in front. Making a
+          //    world sub-pixel to avoid that would defeat the floor's only purpose.
+          const floorTotal = a.ringCap * MIN_PLANET_RADIUS_PX + b.ringCap * MIN_PLANET_RADIUS_PX;
+          if (floorTotal + gap <= distance) {
+            let total = a.ringCap * a.px + b.ringCap * b.px;
+            for (let step = 0; step < 8 && total > target; step += 1) {
+              const excessA = a.ringCap * (a.px - MIN_PLANET_RADIUS_PX);
+              const excessB = b.ringCap * (b.px - MIN_PLANET_RADIUS_PX);
+              if (excessA <= 0 && excessB <= 0) break;
+              if (excessA >= excessB) {
+                a.px -= Math.min(excessA, total - target) / a.ringCap;
+              } else {
+                b.px -= Math.min(excessB, total - target) / b.ringCap;
+              }
+              total = a.ringCap * a.px + b.ringCap * b.px;
+            }
+          }
+        }
+      }
+      if (!changed) break;
+    }
+  }
+
+  /**
+   * Moons carry their planet's screen correction.
+   *
+   * A moon's drawn orbit was laid out against the planet's *unscaled* exaggerated radius
+   * and is then multiplied by the planet's screen correction; its sphere was not, so a
+   * planet squeezed to the ceiling left its moons at full size. (In the reported frame
+   * the "three worlds clustered upper-left" were one planet and two moons, and the two
+   * "ringed worlds" near the star were a planet and its moon.) The moon's own radius is
+   * already capped at a third of its planet's drawn radius in `scales.ts`, so the
+   * cluster reads as one world with moons.
+   */
+  private applyMoonScreenSizes(): void {
+    for (const record of this.planets) {
+      for (const moonRecord of record.moons) {
+        const scale = record.visual.scale;
+        if (Math.abs(scale - moonRecord.visual.scale) > 0.002) moonRecord.visual.setScale(scale);
+      }
+    }
+  }
+
   /** World units per CSS pixel at `at`, for the current camera. */
   private worldPerPixel(camera: THREE.PerspectiveCamera, heightPx: number, at: THREE.Vector3): number {
-    const distance = Math.max(camera.position.distanceTo(at), 1e-9);
+    camera.getWorldDirection(this.forward);
+    const depth = Math.max(this.toBody.copy(at).sub(camera.position).dot(this.forward), 1e-9);
     const fov = (camera.fov * Math.PI) / 180;
-    return (2 * distance * Math.tan(fov / 2)) / Math.max(heightPx, 1);
+    return (2 * depth * Math.tan(fov / 2)) / Math.max(heightPx, 1);
   }
 
   setDpr(dpr: number): void {
@@ -500,7 +653,9 @@ export class SystemView {
         list.push({
           target: { kind: 'moon', id: moon.moon.id },
           position: moon.position,
-          radius: moon.radiusAU * record.visual.scale,
+          // The moon's own drawn scale: it carries the planet's screen correction, and
+          // picking must agree with the drawing.
+          radius: moon.radiusAU * moon.visual.scale,
         });
       }
     }

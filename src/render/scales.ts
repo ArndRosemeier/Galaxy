@@ -82,12 +82,25 @@ export function starVisualRadiusAU(radiusSun: number, innermostOrbitAU: number):
 }
 
 /**
- * Visual radius of a moon in the system view, in AU. Same exaggeration as a planet so
- * the moon-to-planet size ratio stays true; clamped to 45% of its drawn orbit so a
- * close-in moon cannot fill the screen.
+ * Visual radius of a moon in the system view, in AU.
+ *
+ * Same exaggeration as its planet, so the moon-to-planet size ratio is at least the
+ * same order; then clamped to a **third of the planet's drawn radius**, so a moon
+ * always reads as a moon and never as a second world in the same cluster. (The true
+ * radii of this galaxy's moons are 0.7-8.6% of their planet; drawing a 45%-of-orbit
+ * moon, as the earlier rule did, put moons at 0.8-1.9× the planet's drawn radius — the
+ * "three worlds clustered" in the reported system frame were one planet and two
+ * moons.) Still clamped to 45% of its drawn orbit and floored so a pebble is visible.
  */
-export function moonVisualRadiusAU(radiusKm: number, visualOrbitAU: number): number {
-  return Math.max(Math.min(exaggeratedRadiusAU(radiusKm), visualOrbitAU * 0.45), 0.0008);
+export function moonVisualRadiusAU(
+  radiusKm: number,
+  planetVisualRadiusAU: number,
+  visualOrbitAU: number,
+): number {
+  return Math.max(
+    Math.min(exaggeratedRadiusAU(radiusKm), planetVisualRadiusAU * 0.34, visualOrbitAU * 0.45),
+    0.0008,
+  );
 }
 
 /**
@@ -165,11 +178,23 @@ export const MIN_STAR_CORONA_PX = 58;
 
 /**
  * Planets get a floor too: at a system fit, an exaggerated Earth is one or two pixels
- * and cannot be found, let alone clicked. Drawings are scaled up (never past
- * `MAX_PLANET_SCALE`) around their own centre; their *positions* are untouched.
+ * and cannot be found, let alone clicked. Drawings are scaled in screen space around
+ * their own centre — up to the floor, down to the ceiling — and their *positions* are
+ * untouched.
+ *
+ * **The ceiling is in pixels, not in AU.** A clamped exaggerated radius can still be
+ * huge in a wide-span system (an M dwarf with a 97:1 orbital span puts a gas giant's
+ * clamped radius at 1.8 AU), and drawing it at its AU size made worlds collide on
+ * screen. Every planet is therefore drawn between the floor and
+ * `MAX_PLANET_RADIUS_PX`, and `SystemView` resolves any remaining screen overlap by
+ * shrinking the *drawing* (never the position). There is no cap on the upward
+ * correction, because a hard-to-find world is the defect the floor exists to prevent.
  */
 export const MIN_PLANET_RADIUS_PX = 5.5;
-export const MAX_PLANET_SCALE = 3;
+export const MAX_PLANET_RADIUS_PX = 14;
+
+/** Clear screen-space gap left between two drawn bodies, CSS pixels. */
+export const PLANET_OVERLAP_GAP_PX = 1.5;
 
 /** The system view frames the planetary system, with this margin around the outer orbit. */
 export const SYSTEM_FRAME_MARGIN = 1.15;
@@ -179,26 +204,39 @@ export const SYSTEM_FRAME_MARGIN = 1.15;
 // ---------------------------------------------------------------------------
 
 /**
- * **RING_DRAWN_MAX = 4.0.**
+ * **RING_DRAWN_MAX = 2.6.**
  *
  * Real ring systems run to many planet radii: the gas giant in the default system has
  * rings out to **5.99 R**, and drawing that true-to-scale dwarfs the world into a dot in
  * the middle of a record (the owner's "over-dominant scale"). The drawn annulus is
  * therefore compressed about the planet centre so its outer edge is never more than
- * 4 planet radii, with the inner edge carried along proportionally so the ring keeps its
- * width ratio and order, and never starts inside the planet.
+ * 2.6 planet radii — the planet stays the subject and a moon at 2.8-3.2 R still orbits
+ * outside it. The inner edge is carried along proportionally so the ring keeps its
+ * width ratio and order, and never starts inside the planet. A view may compress it
+ * further to make both the planet and the ring fit its frame (the planet view does),
+ * but nothing may draw it larger.
  *
  * The ring's *shadow* and the planet's shadow on the ring both read these same drawn
  * radii, so nothing can disagree about where the rings are. `RingSystem` itself is
  * untouched: the inspector still shows the true radii.
  */
-export const RING_DRAWN_MAX = 4.0;
+export const RING_DRAWN_MAX = 2.6;
 
-/** Drawn ring radii in planet radii, from the generated ones. */
-export function drawnRingRadii(innerRatio: number, outerRatio: number): { inner: number; outer: number } {
-  const outer = Math.max(outerRatio, 1.02);
-  const factor = outer > RING_DRAWN_MAX ? RING_DRAWN_MAX / outer : 1;
-  const inner = Math.max(1.14, innerRatio * factor);
-  return { inner: Math.min(inner, outer * 0.94), outer: Math.max(outer * factor, inner * 1.06) };
+/** The narrowest a drawn ring annulus may be squeezed; below this it is just a rim. */
+export const RING_DRAWN_MIN = 1.25;
+
+/** Drawn ring radii in planet radii, from the generated ones, compressed under `cap`. */
+export function drawnRingRadii(
+  innerRatio: number,
+  outerRatio: number,
+  cap: number = RING_DRAWN_MAX,
+): { inner: number; outer: number } {
+  const trueOuter = Math.max(outerRatio, 1.05);
+  // The cap can only shrink the ring; a view that needs less room passes a smaller one.
+  const outerCap = Math.max(cap, RING_DRAWN_MIN);
+  const outer = Math.min(trueOuter, outerCap);
+  const factor = outer / trueOuter;
+  const inner = Math.min(Math.max(innerRatio * factor, 1.10), Math.max(outer * 0.92, 1.02));
+  return { inner: Math.min(inner, outer * 0.94), outer };
 }
 

@@ -80,30 +80,33 @@ float pointProfile(float d, float sharpness) {
  * planet's surface, so the shadow bands line up with the rings that cast them.
  * `t` is 0 at the inner edge, 1 at the outer edge.
  *
- * The profile is a *density*, not a brightness: broad zones, a few divisions, and a
- * fine ringlet structure. Every transition is a smoothstep wide enough to survive a
- * pixel — hard thresholds on a radial function are what put abrupt black bars in the
- * rings in the frame the owner rejected.
+ * The profile is a *density*, not a brightness: broad zones, a couple of shallow
+ * divisions, and a gentle ringlet structure. Every transition is wide enough to
+ * survive a pixel, and no term is allowed to reach zero — a ring is translucent dust
+ * everywhere, never a black bar, and the spacing is irregular enough not to read as a
+ * record groove. (An earlier profile multiplied the density by 0.02-0.01 at two hard
+ * gaps and squashed it through a 0.16..0.78 smoothstep; that painted the concentric
+ * hard-edged bands in the frame the owner rejected.)
  */
 export const GLSL_RINGS = /* glsl */ `
 float ringDensity(float t) {
-  float zones = vnoise1(t * 2.7 + 4.0);
-  float bands = vnoise1(t * 8.5 + 11.0);
-  float fine = vnoise1(t * 26.0 + 2.0);
-  float dust = vnoise1(t * 62.0 + 7.0);
-  float density = 0.56 + 0.22 * (zones - 0.5) + 0.26 * (bands - 0.5) + 0.32 * (fine - 0.5) + 0.24 * (dust - 0.5);
-  // Rings are high-contrast: dense lanes next to nearly empty ones. Without this the
-  // radial profile averages out into a smooth brown wash.
-  density = smoothstep(0.16, 0.78, clamp(density, 0.0, 1.0));
+  // Low-frequency zones, irregular mid-scale bands and faint ringlets. The
+  // frequencies are deliberately not harmonic: evenly spaced rings are the tell of a
+  // synthetic pattern.
+  float zones = vnoise1(t * 2.1 + 4.0);
+  float bands = vnoise1(t * 5.7 + 11.0);
+  float fine = vnoise1(t * 17.0 + 2.0);
+  float density = 0.70 + 0.17 * (zones - 0.5) + 0.19 * (bands - 0.5) + 0.13 * (fine - 0.5);
 
-  // Divisions: one broad (a Cassini analogue) and one narrow, with soft shoulders.
-  float gapA = smoothstep(0.295, 0.325, t) * (1.0 - smoothstep(0.355, 0.395, t));
-  float gapB = smoothstep(0.640, 0.665, t) * (1.0 - smoothstep(0.690, 0.725, t));
-  density *= 1.0 - 0.98 * gapA;
-  density *= 1.0 - 0.99 * gapB;
+  // Divisions: shallow and wide-shouldered, like the Cassini gap seen through a
+  // telescope — a thinning of the dust, not a painted stripe.
+  float gapA = smoothstep(0.27, 0.40, t) * (1.0 - smoothstep(0.43, 0.60, t));
+  float gapB = smoothstep(0.66, 0.72, t) * (1.0 - smoothstep(0.79, 0.88, t));
+  density *= 1.0 - 0.46 * gapA;
+  density *= 1.0 - 0.40 * gapB;
 
-  // Ringlets: narrow bright lanes, the thing that makes a ring read as particles.
-  density *= 0.72 + 0.52 * smoothstep(0.28, 0.66, vnoise1(t * 52.0 + 21.0));
+  // Ringlets: a gentle brightness variation, never a hard lane.
+  density *= 0.88 + 0.17 * smoothstep(0.25, 0.75, vnoise1(t * 23.0 + 21.0));
   return clamp(density, 0.0, 1.0);
 }
 `;

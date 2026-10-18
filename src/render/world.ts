@@ -238,12 +238,12 @@ void main() {
         float span = max(uRingOuter - uRingInner, 1e-5);
         float rt = (rr - uRingInner) / span;
         float soft = smoothstep(0.0, 0.30, abs(denom));
-        float penumbra = smoothstep(0.0, 0.06, rt) * (1.0 - smoothstep(0.94, 1.05, rt));
+        float penumbra = smoothstep(0.0, 0.10, rt) * (1.0 - smoothstep(0.86, 1.06, rt));
         float density = ringDensity(clamp(rt, 0.0, 1.0));
-        ringShade = 1.0 - 0.42 * soft * uRingOpacity * density * penumbra;
+        ringShade = 1.0 - 0.34 * soft * uRingOpacity * density * penumbra;
         // A narrow extra dimming right at the dense inner ring, which is what a real
         // ring shadow looks like on a cloud deck.
-        ringShade *= 1.0 - 0.22 * soft * uRingOpacity * smoothstep(0.10, 0.25, density) * penumbra;
+        ringShade *= 1.0 - 0.12 * soft * uRingOpacity * smoothstep(0.10, 0.25, density) * penumbra;
       }
     }
   }
@@ -394,12 +394,20 @@ void main() {
 
 const RING_VERT = /* glsl */ `
 attribute float aT;
+uniform float uRingInnerR;
+uniform float uRingOuterR;
 varying float vT;
 varying vec3 vWorld;
 varying vec3 vNormalWorld;
 void main() {
   vT = aT;
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
+  // The annulus' radial extent is a UNIFORM, not baked geometry: a view may compress
+  // the ring to fit its frame (the planet view does) without a second geometry or a
+  // second ring shader. The direction comes from the vertex; only its radius moves.
+  vec2 dir = normalize(position.xz);
+  float r = mix(uRingInnerR, uRingOuterR, aT);
+  vec3 local = vec3(dir.x * r, 0.0, dir.y * r);
+  vec4 worldPos = modelMatrix * vec4(local, 1.0);
   vWorld = worldPos.xyz;
   vNormalWorld = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -424,22 +432,22 @@ void main() {
   // A ring does not end on a line: it thins out over its outer tenth and has a soft
   // inner edge, which is half of what stops it reading as a solid ribbon.
   float edge = smoothstep(0.0, 0.045, vT) * (1.0 - smoothstep(0.90, 1.0, vT));
-  float alpha = uOpacity * (0.08 + 0.92 * density) * edge * 0.82;
+  float alpha = uOpacity * (0.10 + 0.90 * density) * edge * 0.82;
   if (alpha < 0.003) discard;
 
   vec3 N = normalize(vNormalWorld);
   vec3 L = normalize(uStarDir);
   vec3 V = normalize(cameraPosition - vWorld);
-  // Particles scatter: bright when lit, and brighter still looking through them into
-  // the star (forward scattering).
-  float lit = 0.42 + 0.58 * abs(dot(N, L));
+  // Particles scatter: bright when lit, and a little brighter still looking through
+  // them into the star (forward scattering). The tint is a breath, not a lens flare.
+  float lit = 0.46 + 0.54 * abs(dot(N, L));
   float forward = pow(max(dot(-V, L), 0.0), 3.0);
   // Desaturate the data colour toward neutral ice: rings are pale, whatever tint the
   // generator picked for the debris.
   vec3 tint = mix(uRingColor, vec3(0.94, 0.92, 0.88), 0.72);
   vec3 tinted = mix(tint * vec3(1.06, 1.00, 0.90), tint * vec3(0.93, 0.97, 1.04), smoothstep(0.15, 0.95, vT));
   vec3 col = tinted * uStarColor * (0.30 + 0.70 * density) * lit * uStarIntensity;
-  col += uStarColor * forward * density * 0.35;
+  col += uStarColor * forward * density * 0.13;
 
   // The planet's shadow, cast across the ring plane: an analytic sphere shadow with a
   // penumbra, so the rings darken through the shadow instead of snapping to black.
@@ -447,8 +455,8 @@ void main() {
   float along = dot(toPlanet, L);
   if (along > 0.0) {
     float closest = length(vWorld + L * along - uCenter);
-    float shade = smoothstep(uPlanetRadius * 0.90, uPlanetRadius * 1.36, closest);
-    col *= mix(0.42, 1.0, shade);
+    float shade = smoothstep(uPlanetRadius * 0.90, uPlanetRadius * 1.45, closest);
+    col *= mix(0.56, 1.0, shade);
   }
 
   gl_FragColor = vec4(col, alpha);
@@ -551,8 +559,12 @@ export class WorldVisual {
   private readonly ringMaterial: THREE.ShaderMaterial | null;
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
-  private readonly ringInner: number;
-  private readonly ringOuter: number;
+  /** True ring radii in planet radii (the generated ones, never changed). */
+  private ringTrueInner = 0;
+  private ringTrueOuter = 0;
+  /** Drawn ring radii in planet radii (≤ `RING_DRAWN_MAX`); may be compressed per view. */
+  private ringInnerRatio = 0;
+  private ringOuterRatio = 0;
   private readonly ringNormal = new THREE.Vector3(0, 1, 0);
   private readonly lightBalance: number;
   private readonly balancedLight = new THREE.Color(1, 1, 1);
@@ -701,13 +713,12 @@ export class WorldVisual {
     }
 
     if (rings) {
-      const drawn = drawnRingRadii(
-        rings.innerRadiusKm / Math.max(options.planetRadiusKm, 1),
-        rings.outerRadiusKm / Math.max(options.planetRadiusKm, 1),
-      );
-      this.ringInner = drawn.inner * radius;
-      this.ringOuter = drawn.outer * radius;
-      const ringGeo = ringGeometry(this.ringInner, this.ringOuter, 192);
+      this.ringTrueInner = rings.innerRadiusKm / Math.max(options.planetRadiusKm, 1);
+      this.ringTrueOuter = rings.outerRadiusKm / Math.max(options.planetRadiusKm, 1);
+      const drawn = drawnRingRadii(this.ringTrueInner, this.ringTrueOuter);
+      this.ringInnerRatio = drawn.inner;
+      this.ringOuterRatio = drawn.outer;
+      const ringGeo = ringGeometry(drawn.inner * radius, drawn.outer * radius, 192);
       this.geometries.push(ringGeo);
       this.ringMaterial = new THREE.ShaderMaterial({
         vertexShader: RING_VERT,
@@ -720,6 +731,8 @@ export class WorldVisual {
           uStarIntensity: { value: 1 },
           uCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: radius },
+          uRingInnerR: { value: drawn.inner * radius },
+          uRingOuterR: { value: drawn.outer * radius },
         },
         transparent: true,
         depthWrite: false,
@@ -731,14 +744,54 @@ export class WorldVisual {
       this.rings.renderOrder = 4;
       this.tilt.add(this.rings);
       this.surfaceMaterial.uniforms.uRingOpacity!.value = Math.min(Math.max(rings.opacity, 0), 1);
-      this.surfaceMaterial.uniforms.uRingInner!.value = this.ringInner;
-      this.surfaceMaterial.uniforms.uRingOuter!.value = this.ringOuter;
+      this.applyRingUniforms();
     } else {
       this.rings = null;
-      this.ringInner = 0;
-      this.ringOuter = 0;
+      this.ringTrueInner = 0;
+      this.ringTrueOuter = 0;
+      this.ringInnerRatio = 0;
+      this.ringOuterRatio = 0;
       this.ringMaterial = null;
     }
+  }
+
+  /**
+   * Compress the drawn rings to `cap` planet radii.
+   *
+   * The cap can only shrink the ring (never beyond `RING_DRAWN_MAX`): the planet view
+   * shrinks it until the whole planet + annulus fits its frame, and the system view
+   * shrinks it when a neighbour would otherwise collide. The annulus keeps its true
+   * width ratio and order because `drawnRingRadii` carries the inner edge along
+   * proportionally. Ring vertices are remapped in the shader, so this costs a few
+   * uniforms and no rebuild.
+   */
+  setRingCap(cap: number): void {
+    if (!this.ringMaterial) return;
+    const drawn = drawnRingRadii(this.ringTrueInner, this.ringTrueOuter, cap);
+    if (
+      Math.abs(drawn.outer - this.ringOuterRatio) < 0.008 &&
+      Math.abs(drawn.inner - this.ringInnerRatio) < 0.008
+    ) {
+      return;
+    }
+    this.ringInnerRatio = drawn.inner;
+    this.ringOuterRatio = drawn.outer;
+    this.ringMaterial.uniforms.uRingInnerR!.value = this.ringInnerRatio * this.radius;
+    this.ringMaterial.uniforms.uRingOuterR!.value = this.ringOuterRatio * this.radius;
+    this.applyRingUniforms();
+  }
+
+  /** Drawn ring outer radius in planet radii, or 1 when the world has no rings. */
+  get ringOuterRadius(): number {
+    return this.rings ? this.ringOuterRatio : 1;
+  }
+
+  /** Ring radii in world units for the current drawn scale (shadow maths). */
+  private applyRingUniforms(): void {
+    if (!this.ringMaterial) return;
+    this.ringMaterial.uniforms.uPlanetRadius!.value = this.radius * this.drawnScale;
+    this.surfaceMaterial.uniforms.uRingInner!.value = this.ringInnerRatio * this.radius * this.drawnScale;
+    this.surfaceMaterial.uniforms.uRingOuter!.value = this.ringOuterRatio * this.radius * this.drawnScale;
   }
 
   /**
@@ -753,11 +806,7 @@ export class WorldVisual {
     if (scale === this.drawnScale) return;
     this.drawnScale = scale;
     this.group.scale.setScalar(scale);
-    if (this.ringMaterial) {
-      this.ringMaterial.uniforms.uPlanetRadius!.value = this.radius * scale;
-      this.surfaceMaterial.uniforms.uRingInner!.value = this.ringInner * scale;
-      this.surfaceMaterial.uniforms.uRingOuter!.value = this.ringOuter * scale;
-    }
+    if (this.ringMaterial) this.applyRingUniforms();
   }
 
   /** The scale currently applied (1 if never set). */

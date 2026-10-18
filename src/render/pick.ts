@@ -17,6 +17,8 @@ import * as THREE from 'three';
 const ndc = new THREE.Vector2();
 const projected = new THREE.Vector3();
 const scratch = new THREE.Vector3();
+const forward = new THREE.Vector3();
+const toBody = new THREE.Vector3();
 
 /** Page/client pixels plus the canvas rect to normalised device coordinates. */
 export function pointerToNdc(
@@ -47,17 +49,25 @@ export function projectToScreen(
   };
 }
 
-/** Screen radius in CSS pixels of a sphere of `radiusWorld` at `world`. */
+/**
+ * Screen radius in CSS pixels of a sphere of `radiusWorld` at `world`.
+ *
+ * Uses the camera's FORWARD depth, not the Euclidean distance: a world near the edge
+ * of the frame is farther from the camera than it is deep, and using the distance
+ * under-reported its drawn size by up to ~10% — enough for the system view's
+ * screen-space no-overlap solve to leave a seam at the frame's edge.
+ */
 export function screenRadiusPx(
   camera: THREE.PerspectiveCamera,
   world: THREE.Vector3,
   radiusWorld: number,
   height: number,
 ): number {
-  const distance = camera.position.distanceTo(world);
-  if (distance <= radiusWorld) return height;
+  camera.getWorldDirection(forward);
+  const depth = toBody.copy(world).sub(camera.position).dot(forward);
+  if (!(depth > 0)) return 0;
   const fov = (camera.fov * Math.PI) / 180;
-  return (radiusWorld / distance) * (height / 2) / Math.tan(fov / 2);
+  return (radiusWorld / depth) * (height / 2) / Math.tan(fov / 2);
 }
 
 export interface ScreenTarget<T> {
