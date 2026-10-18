@@ -199,7 +199,9 @@ export function mountUI(root: HTMLElement, app: GalaxyApp): () => void {
     if (media.matches) {
       const { selection } = app.store.state;
       tab = selection.systemId ? 'details' : 'galaxy';
-      sheetOpen = Boolean(selection.planetId);
+      // The sheet stays closed: on a phone the world IS the point, and a dossier that
+      // opens itself hides it. The Details tab carries a dot instead.
+      sheetOpen = false;
     } else {
       sheetOpen = false;
     }
@@ -219,9 +221,9 @@ export function mountUI(root: HTMLElement, app: GalaxyApp): () => void {
     timebar.setCompact(media.matches);
     if (media.matches) {
       tab = state.selection.systemId ? 'details' : 'galaxy';
-      // A deep link straight to a planet opens its dossier; a star link leaves the
-      // scene in view (the Details tab is dotted instead).
-      sheetOpen = Boolean(state.selection.planetId);
+      // A deep link straight to a planet shows the world, not its dossier; the Details
+      // tab is dotted so the reader knows there is something to open.
+      sheetOpen = false;
     }
     applySheet();
     setAttr(shell, 'data-has-selection', state.selection.systemId ? 'true' : 'false');
@@ -254,9 +256,8 @@ export function mountUI(root: HTMLElement, app: GalaxyApp): () => void {
       // under the finger that is dragging a slider.
       if (media.matches && !paramsChanged && state.selection !== previous.selection) {
         if (state.selection.planetId && state.selection.planetId !== previous.selection.planetId) {
-          // A world was chosen from the worlds list: its dossier is the reason.
+          // Entering a world shows the world; the dossier opens only when asked for.
           tab = 'details';
-          sheetOpen = true;
         } else if (state.selection.systemId) {
           // A star was tapped: keep the system itself visible; the Details tab carries
           // the dot that says there is something to read.
