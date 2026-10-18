@@ -8,9 +8,9 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: f7c9427 · 2026-10-18T20:55Z
+reconciled: e996e67 · 2026-10-18T21:46Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on one writer (polish)
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on one writer (polish2)
 
 OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
@@ -24,7 +24,9 @@ LANDED | slice=integration | sha=c6dcbbb | verify=MY OWN: gate exit 0 (9 files /
 
 LANDED | slice=ui | sha=f7c9427 | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own screenshots of home/system/planet/phone read, scope clean (only src/ui, tests/ui, append-only styles.css, 6-line main.ts mount) | worktree and session retired; branch deleted local+remote | docs=ledger 7,8; board | note=real-mouse e2e through data-testids (planet-row → planet, back → system, crumb → galaxy, play, speed, preset, randomize, copy); 8/8 QA clean
 retired_branch=feat/ui
-IN-FLIGHT | slice=polish | session=96cde50e-3282-4abf-bd3f-4685d7b05562 | worktree=/home/administrator/projects/Galaxy/worktrees/polish | branch=feat/polish | base=c6dcbbb | state=writing | scope=src/render/** + lab.html — galaxy colour/stars/core, system framing/star/belt, planet rings/bands/night lights
+LANDED | slice=polish | sha=6d596bc | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own frames of galaxy, system, ringed giant and an inhabited ocean world read | worktree and session retired; branch deleted local+remote | docs=ledger 9,10; board; ARCHITECTURE budget corrected | note=galaxy now reads as a photograph; ocean world fills the frame beautifully; my breadth survey found three NEW defects (planet crops at 900x600, rings dominate giants, planets overlap in wide-span systems)
+retired_branch=feat/polish
+IN-FLIGHT | slice=polish2 | session=e8c8e570-b7de-45ec-8ca7-1259fe7a9dc5 | worktree=/home/administrator/projects/Galaxy/worktrees/polish2 | branch=feat/polish2 | base=e996e67 | state=writing | scope=src/render/** — fix planet framing at any aspect, soften/cap rings, no overlapping bodies in the system view, star dominance
 
 QUEUE | row=5 | visual QA: final frames at laptop and phone width, after polish and UI land | src=docs/TESTING.md
 QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
@@ -57,6 +59,15 @@ QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, stat
 - **Verified frames so far:** galaxy reads as a spiral; the planet dossier is strong;
   the **system view still frames the asteroid belt and loses its star** — the polish
   slice (`feat/polish`) is fixing that now.
+
+- **Polish landed** (`6d596bc`): galaxy 8 draws / 42.9k points, system 28 draws, planet
+  12 draws; the disc reads as a photograph, the system has a visible star, the ocean
+  world fills the frame. My breadth survey (7 planet kinds, 900×600 and 390×844) then
+  found the planet view cropping worlds at non-16:10 aspects, rings dominating gas
+  giants, and overlapping bodies in wide-span systems — that is polish2.
+- **The overlay is accepted** (ledger 10): the panels sit over the scene, as a map's
+  legend does. The free band at 1440 is nearly centred (250 px left, 340 px right), so
+  a lens shift would buy ~45 px; insetting would shrink the subject.
 
 ## Guards
 
