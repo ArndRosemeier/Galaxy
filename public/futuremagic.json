@@ -1,0 +1,8 @@
+{
+  "title": "Galaxy",
+  "tagline": "A procedural galaxy you can fall into — star by star, world by world.",
+  "tags": ["procedural", "space", "webgl", "threejs", "exploration"],
+  "screenshot": "/galaxy/shots/card.png",
+  "description": "Generate a spiral galaxy from a seed, then fall from the disc to a star system and down to a single world. Planets, moons, rings and asteroid belts are generated, never stored; every one has a full dossier — radius, mass, gravity, atmosphere, biosphere, moons — and every URL is a place you can share.",
+  "cta": "Open the atlas"
+}
