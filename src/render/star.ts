@@ -88,8 +88,9 @@ void main() {
 
   // A tight core plus a broad halo; ray structure keeps it from looking like a CSS
   // radial gradient. The noise is evaluated once per pixel on an angular coordinate.
-  float rays = 0.72 + 0.28 * sin(angle * 17.0 + uSeed) * sin(angle * 7.0 + uSeed * 0.7);
-  rays *= 0.85 + 0.30 * vnoise(vec3(angle * 2.2 + uSeed, uTime * 0.03, 0.0));
+  // Ray structure has to be a texture on the light, not a starburst drawn on top of it.
+  float rays = 0.86 + 0.14 * sin(angle * 13.0 + uSeed) * sin(angle * 5.0 + uSeed * 0.7);
+  rays *= 0.90 + 0.20 * vnoise(vec3(angle * 2.2 + uSeed, uTime * 0.03, 0.0));
   float core = exp(-r * 5.4) * 0.95;
   float halo = exp(-r * 1.55) * 0.28;
   float a = (core + halo) * rays * smoothstep(1.0, 0.72, r);

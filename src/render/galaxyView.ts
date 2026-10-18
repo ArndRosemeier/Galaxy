@@ -105,7 +105,7 @@ void main() {
   // --- nucleus and bulge: closed-form, smooth, warm -------------------------
   float nucleus = exp(-pow(r / 0.018, 1.10));
   float bulge = exp(-pow(r / 0.088, 1.32));
-  vec3 colour = uNucleusColor * nucleus * 3.0;
+  vec3 colour = uNucleusColor * nucleus * 2.6;
   colour += uBulgeColor * bulge * (0.42 + 0.50 * uCoreDensity);
   colour += uBulgeColor * bulgeTex * 0.09 * smoothstep(0.26, 0.02, r);
 
@@ -554,7 +554,7 @@ export class GalaxyView {
     // is a quarter of a percent of the 400k budget.
     const fieldCount = Math.round(Math.min(Math.max(systems.length * 210, 18_000), 70_000));
     const knotCount = Math.round(Math.min(Math.max(systems.length * 2.4, 240), 1200));
-    const total = systems.length + fieldCount + knotCount;
+    const total = systems.length + fieldCount + knotCount + Math.round(fieldCount * 0.03);
 
     const positions = new Float32Array(total * 3);
     const colors = new Float32Array(total * 3);
@@ -652,10 +652,30 @@ export class GalaxyView {
       if (interarm) bright[i] = bright[i]! * 0.55;
     }
 
+    // A warm population inside the bulge: old stars, individually faint, together the
+    // granular texture that keeps the nucleus from reading as an airbrushed gradient.
+    const bulgeCount = Math.round(fieldCount * 0.03);
+    for (let b = 0; b < bulgeCount; b += 1) {
+      const i = systems.length + fieldCount + b;
+      const rb = 0.02 + 0.16 * Math.pow(rng(), 0.55);
+      const theta = rng() * Math.PI * 2;
+      const radius = this.radius * rb;
+      positions[i * 3] = Math.cos(theta) * radius;
+      positions[i * 3 + 1] = (rng() - 0.5) * this.radius * 0.012 * (1 - rb * 4);
+      positions[i * 3 + 2] = Math.sin(theta) * radius;
+      const warm = chroma(GALAXY.bulge);
+      colors[i * 3] = warm[0];
+      colors[i * 3 + 1] = warm[1];
+      colors[i * 3 + 2] = warm[2];
+      sizes[i] = 0.9 + rng() * 0.7;
+      halo[i] = 0.05 + rng() * 0.08;
+      bright[i] = 0.10 + Math.pow(rng(), 2.0) * 0.35;
+    }
+
     // H-II knots: pink star-forming clusters. Sparse on purpose — a galaxy speckled
     // evenly with pink reads as confetti.
     for (let k = 0; k < knotCount; k += 1) {
-      const i = systems.length + fieldCount + k;
+      const i = systems.length + fieldCount + Math.round(fieldCount * 0.03) + k;
       const r = 0.14 + rng() * 0.78;
       const arm = Math.floor(rng() * galaxy.params.arms);
       const side = rng() < 0.5 ? -1 : 1;
