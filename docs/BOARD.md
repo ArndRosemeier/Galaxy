@@ -29,7 +29,7 @@ retired_branch=feat/polish
 LANDED | slice=polish2 | sha=edf07ef (cherry-picked from 9c1e7ba) | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own frames at 1440x900 / 900x600 / 390x844 read, QA 9/9 clean | worktree and session retired; branch deleted local+remote | docs=ARCHITECTURE (screen-space ceilings); board | note=planet 10 draws / 36-46k tris; subject 58-60% of the shorter dimension at every aspect; rings soft and capped 2.6R; no body overlaps except true line-of-sight conjunctions
 retired_branch=feat/polish2
 LANDED | slice=ui-sheet-fix | sha=8047245 | verify=MY OWN: gate exit 0, phone and 900x600 frames read | dispatcher-owned | note=entering a world shows the world; the dossier sheet opens only when asked
-LANDED | slice=publish | sha=fa6b8ca | verify=CONTENT: public page serves the exact built asset assets/index-TPhQ_sse.js (HTTP 200, cf-cache-status DYNAMIC), local host 200 for page and asset | note=https://apps.futuremagic.de/galaxy/ is live; hub refreshed
+LANDED | slice=publish | sha=fa6b8ca | verify=CONTENT: public page serves the exact built asset assets/index-TPhQ_sse.js (HTTP 200, cf-cache-status DYNAMIC), local host 200 for page and asset | note=https://apps.futuremagic.de/galaxy/ is live; hub refreshed; card enriched from public/futuremagic.json (hub index carries title, tagline, screenshot, tags)
 
 QUEUE | none — the request is delivered. Next owner message is the next work order.
 ```
