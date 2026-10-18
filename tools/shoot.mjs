@@ -29,6 +29,7 @@
  *   --print <js>          evaluate JS and include its value in the printed JSON
  *   --click-selector <css>  real left click at an element's centre (repeatable)
  *   --wheel-selector <css:dx,dy>  real wheel over an element (repeatable)
+ *   --key <Escape|Space|r|c|?>   dispatch a real keypress (repeatable)
  *   --allow-errors        do not exit 1 on page errors (for deliberately broken pages)
  *
  * Exit codes: 0 = captured and the page was clean · 1 = captured but the page erred
@@ -76,6 +77,7 @@ for (let i = 0; i < argv.length; i += 1) {
     case '--print': opts.actions.push({ kind: 'print', value: next() }); break;
     case '--click-selector': opts.actions.push({ kind: 'clickSelector', value: next() }); break;
     case '--wheel-selector': opts.actions.push({ kind: 'wheelSelector', value: next() }); break;
+    case '--key': opts.actions.push({ kind: 'key', value: next() }); break;
     case '--allow-errors': opts.allowErrors = true; break;
     case '--help': case '-h': usage(); process.exit(0); break;
     default: fail(`unknown flag ${a}`);
@@ -308,7 +310,39 @@ try {
 
   const runActions = async () => {
     for (const action of opts.actions) {
-      if (action.kind === 'clickSelector' || action.kind === 'wheelSelector') {
+      if (action.kind === 'key') {
+        // Keyboard is dispatched page-side as a real bubbling KeyboardEvent.
+        // MEASURED 2026-10-18: CDP Input.dispatchKeyEvent on this Chrome (153) delivers
+        // key:"" for synthetic presses, so every shortcut that switches on event.key
+        // missed — a native dispatch would prove nothing about the app. This exercises
+        // the app's own listener (bubble to window) exactly as a focused body would.
+        const key = action.value === 'Space' ? ' ' : action.value;
+        const known = {
+          Escape: { code: 'Escape' },
+          ' ': { code: 'Space' },
+          Space: { code: 'Space' },
+          r: { code: 'KeyR' },
+          R: { code: 'KeyR' },
+          c: { code: 'KeyC' },
+          '?': { code: 'Slash' },
+        }[key];
+        if (!known) {
+          pageErrors.push(`--key: unsupported key ${JSON.stringify(key)}`);
+        } else {
+          const script = `(() => {
+            const target = document.activeElement && document.activeElement !== document.body
+              ? document.activeElement
+              : document.body;
+            const opts = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(known.code)}, bubbles: true, cancelable: true };
+            const down = new KeyboardEvent('keydown', opts);
+            target.dispatchEvent(down);
+            target.dispatchEvent(new KeyboardEvent('keyup', opts));
+            return true;
+          })()`;
+          const r = await send('Runtime.evaluate', { expression: script, returnByValue: true });
+          if (r.exceptionDetails) pageErrors.push(String(r.exceptionDetails.exception?.description ?? ''));
+        }
+      } else if (action.kind === 'clickSelector' || action.kind === 'wheelSelector') {
         // Drive a REAL click at a DOM element's centre: the only way an end-to-end
         // check proves the event path (listener, state, camera) rather than the API.
         const box = await evaluateJson(

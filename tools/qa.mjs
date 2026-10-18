@@ -48,6 +48,14 @@ const scenarios = [
   },
   { name: 'galaxy-phone', size: '390x844', wait: 6000, evalJs: [] },
   { name: 'system', size: '1440x900', wait: 5000, evalJs: ['window.__galaxy.goto(4)'] },
+  {
+    name: 'e2e-keys',
+    size: '1440x900',
+    wait: 5000,
+    evalJs: ['window.__galaxy.goto(4)'],
+    keyPresses: ['Escape'],
+    expectView: 'galaxy',
+  },
   { name: 'system-phone', size: '390x844', wait: 5000, evalJs: ['window.__galaxy.goto(4)'] },
   { name: 'planet', size: '1440x900', wait: 5000, evalJs: ['window.__galaxy.gotoPlanet(4, 1)'] },
   { name: 'planet-phone', size: '390x844', wait: 5000, evalJs: ['window.__galaxy.gotoPlanet(4, 1)'] },
@@ -69,6 +77,7 @@ function runShot(scenario, extraEval = []) {
   args.push('--size', scenario.size, '--wait', String(scenario.wait));
   for (const js of [...scenario.evalJs, ...extraEval]) args.push('--eval', js);
   for (const sel of scenario.clickSelectors ?? []) args.push('--click-selector', sel);
+  for (const key of scenario.keyPresses ?? []) args.push('--key', key);
   args.push('--print', INFO);
   args.push('--print', 'window.__galaxy.store.state.view');
 
