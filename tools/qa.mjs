@@ -38,6 +38,14 @@ const FIND_CIVILISATION = `(() => {
 
 const scenarios = [
   { name: 'galaxy', size: '1440x900', wait: 6000, evalJs: [] },
+  {
+    name: 'e2e-click',
+    size: '1440x900',
+    wait: 5000,
+    evalJs: [],
+    clickSelectors: ['#scene'],
+    expectView: 'system',
+  },
   { name: 'galaxy-phone', size: '390x844', wait: 6000, evalJs: [] },
   { name: 'system', size: '1440x900', wait: 5000, evalJs: ['window.__galaxy.goto(4)'] },
   { name: 'system-phone', size: '390x844', wait: 5000, evalJs: ['window.__galaxy.goto(4)'] },
@@ -60,7 +68,9 @@ function runShot(scenario, extraEval = []) {
   const args = ['tools/shoot.mjs', '--serve', 'dist', '--url', '/', '--out', out];
   args.push('--size', scenario.size, '--wait', String(scenario.wait));
   for (const js of [...scenario.evalJs, ...extraEval]) args.push('--eval', js);
+  for (const sel of scenario.clickSelectors ?? []) args.push('--click-selector', sel);
   args.push('--print', INFO);
+  args.push('--print', 'window.__galaxy.store.state.view');
 
   const res = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8' });
   let parsed = null;
@@ -76,6 +86,8 @@ function runShot(scenario, extraEval = []) {
     bytes: parsed?.bytes ?? (statExists(out) ? statSync(out).size : 0),
     errors: (parsed?.consoleErrors?.length ?? 0) + (parsed?.pageErrors?.length ?? 0),
     info: parsed?.prints?.[0] ?? null,
+    view: parsed?.prints?.[1] ?? null,
+    expectView: scenario.expectView ?? null,
     stderr: res.stderr?.trim().slice(0, 300) ?? '',
   };
 }
@@ -151,7 +163,9 @@ let failed = 0;
 for (const r of results) {
   const kb = Math.round(r.bytes / 1024);
   const info = r.info ?? { drawCalls: '-', triangles: '-', points: '-' };
-  if (r.exit !== 0 || r.errors > 0 || r.bytes < 100_000) failed += 1;
+  const viewMiss = r.expectView && r.view !== r.expectView;
+  if (r.exit !== 0 || r.errors > 0 || r.bytes < 100_000 || viewMiss) failed += 1;
+  if (viewMiss) console.log(`  expected view ${r.expectView}, got ${r.view ?? 'none'}`);
   console.log(
     `${pad(r.scenario, 16)} ${padL(r.exit, 4)} ${padL(r.errors, 6)} ${padL(kb, 6)} ${padL(info.drawCalls, 5)} ${padL(info.triangles, 7)} ${padL(info.points, 7)}`,
   );

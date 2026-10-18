@@ -27,6 +27,8 @@
  *   --wheel <x,y,dy>      wheel at page coordinates (repeatable, in order)
  *   --eval <js>           evaluate JS in the page after load (repeatable)
  *   --print <js>          evaluate JS and include its value in the printed JSON
+ *   --click-selector <css>  real left click at an element's centre (repeatable)
+ *   --wheel-selector <css:dx,dy>  real wheel over an element (repeatable)
  *   --allow-errors        do not exit 1 on page errors (for deliberately broken pages)
  *
  * Exit codes: 0 = captured and the page was clean · 1 = captured but the page erred
@@ -72,6 +74,8 @@ for (let i = 0; i < argv.length; i += 1) {
     case '--wheel': opts.actions.push({ kind: 'wheel', value: next() }); break;
     case '--eval': opts.actions.push({ kind: 'eval', value: next() }); break;
     case '--print': opts.actions.push({ kind: 'print', value: next() }); break;
+    case '--click-selector': opts.actions.push({ kind: 'clickSelector', value: next() }); break;
+    case '--wheel-selector': opts.actions.push({ kind: 'wheelSelector', value: next() }); break;
     case '--allow-errors': opts.allowErrors = true; break;
     case '--help': case '-h': usage(); process.exit(0); break;
     default: fail(`unknown flag ${a}`);
@@ -225,6 +229,13 @@ function connect(wsUrl) {
   });
 }
 
+
+async function evaluateJson(send, expression) {
+  const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+  if (r.exceptionDetails) throw new Error(String(r.exceptionDetails.exception?.description ?? 'evaluate failed'));
+  return r.result?.value ?? null;
+}
+
 // --------------------------------------------------------------------- driver
 let server = null;
 let chrome = null;
@@ -297,7 +308,29 @@ try {
 
   const runActions = async () => {
     for (const action of opts.actions) {
-      if (action.kind === 'click') {
+      if (action.kind === 'clickSelector' || action.kind === 'wheelSelector') {
+        // Drive a REAL click at a DOM element's centre: the only way an end-to-end
+        // check proves the event path (listener, state, camera) rather than the API.
+        const box = await evaluateJson(
+          send,
+          `(() => {
+             const el = document.querySelector(${JSON.stringify(action.value)});
+             if (!el) return null;
+             const r = el.getBoundingClientRect();
+             return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+           })()`,
+        );
+        if (!box) {
+          pageErrors.push(`click-selector: no element matches ${action.value}`);
+        } else if (action.kind === 'clickSelector') {
+          await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, button: 'none' });
+          await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 });
+          await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 });
+        } else {
+          const [dx, dy] = String(action.value).split(':').slice(1).join(':').split(',').map(Number);
+          await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: dx || 0, deltaY: dy || 0 });
+        }
+      } else if (action.kind === 'click') {
         const [x, y] = action.value.split(',').map(Number);
         await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
