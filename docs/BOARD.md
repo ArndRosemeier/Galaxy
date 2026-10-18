@@ -8,21 +8,24 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: 072fe7c · 2026-10-18T19:54Z
+reconciled: c6dcbbb · 2026-10-18T20:35Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=working autonomously — owner away
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on two writers (ui, polish)
 
 OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
 REQUEST | row=2 | A procedural galaxy creator in TS: planets, moons, asteroids, rings; zoom from the disc to a single world; detailed, pleasing, intuitive | src=ledger row 2 (owner's words verbatim)
 
-LANDED | slice=sim | sha=072fe7c | verify=MY OWN: gate exit 0 (8 files / 83 tests), my injection ×1.05 gravity reddened the NAMED gravity pin then restored to 8/8 green, my own cross-process SHA 87df6c64… matched and another seed f4de6ba0… differed | worktree and session retired; branch feat/sim deleted local+remote | docs=ledger 4,5; board | note=added optional SystemContext to the contract; a system cache must be cleared on regeneration
+LANDED | slice=sim | sha=072fe7c | verify=MY OWN: gate exit 0 (8 files / 83 tests), my injection ×1.05 gravity reddened the NAMED gravity pin then restored to green, my own cross-process SHA matched and another seed differed | worktree and session retired; branch deleted local+remote | docs=ledger 4,5,6; board | note=optional SystemContext added; system cache must key on the full stub
 retired_branch=feat/sim
-IN-FLIGHT | slice=renderer | session=8679b07f-696f-4779-9ca1-be76c3aa3bf1 | worktree=/home/administrator/projects/Galaxy/worktrees/renderer | branch=feat/render | base=5c75da5 | state=writing | scope=src/render/** + lab.html + dev fixtures; renders the frozen contract, generates nothing
+LANDED | slice=renderer | sha=7bf495f | verify=MY OWN: gate exit 0 (9 files / 90 tests), my own screenshots of galaxy/system/planet read, scope clean (src/sim, src/app, docs untouched) | worktree and session retired; branch deleted local+remote | note=info() within budget (galaxy 8 draws, system 50, planet 11); frames show the polish gaps now assigned
+retired_branch=feat/render
+LANDED | slice=integration | sha=c6dcbbb | verify=MY OWN: gate exit 0 (9 files / 90 tests), built app screenshots of all three views, zero console errors | dispatcher-owned | note=real generation drives the real renderer; state store, share-link codec and deep-system cache live
 
-QUEUE | row=3 | integration: mount real generation + renderer in main.ts, app state, selection, three views, transitions | src=docs/ARCHITECTURE.md
-QUEUE | row=4 | UI: parameter panel, inspector, presets, seed/share URL, time controls, keyboard, responsive layout | src=docs/ARCHITECTURE.md
-QUEUE | row=5 | visual polish: deepen galaxy/system/planet frames against the owner's bar; phone + laptop | src=docs/TESTING.md
+IN-FLIGHT | slice=ui | session=cae84bfd-ddc4-45ca-8d2b-8a456eae4c04 | worktree=/home/administrator/projects/Galaxy/worktrees/ui | branch=feat/ui | base=c6dcbbb | state=writing | scope=src/ui/**, tests/ui/**, append-only src/styles.css, minimal main.ts mount — panels, inspector, presets, time bar, keyboard, responsive
+IN-FLIGHT | slice=polish | session=96cde50e-3282-4abf-bd3f-4685d7b05562 | worktree=/home/administrator/projects/Galaxy/worktrees/polish | branch=feat/polish | base=c6dcbbb | state=writing | scope=src/render/** + lab.html — galaxy colour/stars/core, system framing/star/belt, planet rings/bands/night lights
+
+QUEUE | row=5 | visual QA: final frames at laptop and phone width, after polish and UI land | src=docs/TESTING.md
 QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
 ```
 
