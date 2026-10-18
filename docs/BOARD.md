@@ -8,9 +8,9 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: c6dcbbb · 2026-10-18T20:16Z
+reconciled: f7c9427 · 2026-10-18T20:55Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on two writers (ui, polish)
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on one writer (polish)
 
 OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
@@ -22,7 +22,8 @@ LANDED | slice=renderer | sha=7bf495f | verify=MY OWN: gate exit 0 (9 files / 90
 retired_branch=feat/render
 LANDED | slice=integration | sha=c6dcbbb | verify=MY OWN: gate exit 0 (9 files / 90 tests), built app screenshots of all three views, zero console errors | dispatcher-owned | note=real generation drives the real renderer; state store, share-link codec and deep-system cache live
 
-IN-FLIGHT | slice=ui | session=cae84bfd-ddc4-45ca-8d2b-8a456eae4c04 | worktree=/home/administrator/projects/Galaxy/worktrees/ui | branch=feat/ui | base=c6dcbbb | state=writing | scope=src/ui/**, tests/ui/**, append-only src/styles.css, minimal main.ts mount — panels, inspector, presets, time bar, keyboard, responsive
+LANDED | slice=ui | sha=f7c9427 | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own screenshots of home/system/planet/phone read, scope clean (only src/ui, tests/ui, append-only styles.css, 6-line main.ts mount) | worktree and session retired; branch deleted local+remote | docs=ledger 7,8; board | note=real-mouse e2e through data-testids (planet-row → planet, back → system, crumb → galaxy, play, speed, preset, randomize, copy); 8/8 QA clean
+retired_branch=feat/ui
 IN-FLIGHT | slice=polish | session=96cde50e-3282-4abf-bd3f-4685d7b05562 | worktree=/home/administrator/projects/Galaxy/worktrees/polish | branch=feat/polish | base=c6dcbbb | state=writing | scope=src/render/** + lab.html — galaxy colour/stars/core, system framing/star/belt, planet rings/bands/night lights
 
 QUEUE | row=5 | visual QA: final frames at laptop and phone width, after polish and UI land | src=docs/TESTING.md
@@ -48,6 +49,14 @@ QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, stat
   kinds gas 167 · desert 119 · ice 85 · barren 71 · icegiant 59 · toxic 50 · ocean 30 ·
   terrestrial 15 · lava 9; 7 living worlds (4 microbial, 1 flora, 1 fauna, 1
   civilization). Generation: 1.6 ms for 180 systems, 4.6 ms for 600.
+
+- **The interface landed** (`f7c9427`): an overlay legend (parameters, presets
+  filmstrip, seed + share), a dossier inspector with human units, a breadcrumb, a
+  transport dock, keyboard shortcuts and a phone bottom sheet. Driven by real mouse
+  events in QA, not by API calls.
+- **Verified frames so far:** galaxy reads as a spiral; the planet dossier is strong;
+  the **system view still frames the asteroid belt and loses its star** — the polish
+  slice (`feat/polish`) is fixing that now.
 
 ## Guards
 
