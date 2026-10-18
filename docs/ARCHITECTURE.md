@@ -87,10 +87,21 @@ Measured with `renderer.info` in the screenshot harness, on software GL (SwiftSh
 
 - galaxy view: **≤ 8 draw calls** (one point cloud for stars, one for dust, sprites
   batched), ≤ 400k points.
-- system view: **≤ 120 draw calls**, ≤ 60k triangles for belts (instanced).
+- system view: **≤ 120 draw calls**, ≤ 60k triangles. Belts are **point sprites, not
+  instanced meshes**: a 1–2 px grain of dust is the only honest way to draw a belt at
+  system scale, and it costs no triangles.
 - planet view: **≤ 40 draw calls**, ≤ 120k triangles.
 - no render target above 2048×2048 except the swapped post chain; total texture
   memory ≤ 256 MB.
+
+Measured at `6d596bc`: galaxy 8 draws / 42.9k points · system 28 draws / 50.1k tris /
+13.4k points · planet 12 draws / 57k tris.
+
+**Documented rendering exaggerations** (all in `src/render/scales.ts`, all deliberate —
+the inspector always shows the true numbers): planet radii in the system view are drawn
+at 3500× and then clamped so discs cannot overlap; the star is floored at 11 px
+photosphere and 58 px corona; ring systems are compressed to ≤ 4 planet radii; orbit
+lines are the true Kepler ellipses. Real scales would render every world invisible.
 
 Real-GPU frame rate is the owner's machine, not this host: software GL here cannot
 measure fps, so performance claims are made about **counts and budgets**, never about
