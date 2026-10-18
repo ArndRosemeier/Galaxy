@@ -10,16 +10,19 @@ The record vocabulary and the contract live in the upstream doc
 ```
 reconciled: 5c75da5 · 2026-10-18T19:40Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on two writers
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=working autonomously — owner away
+
+OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
 REQUEST | row=2 | A procedural galaxy creator in TS: planets, moons, asteroids, rings; zoom from the disc to a single world; detailed, pleasing, intuitive | src=ledger row 2 (owner's words verbatim)
 
 IN-FLIGHT | slice=sim | session=0e571d68-9bb7-45a7-8f4a-4e142bd2ac3d | worktree=/home/administrator/projects/Galaxy/worktrees/sim | branch=feat/sim | base=5c75da5 | state=writing | scope=src/sim/** (rng, noise, naming, galaxy, system, params, presets, index) + tests/sim/**; types.ts and orbit.ts frozen
 IN-FLIGHT | slice=renderer | session=8679b07f-696f-4779-9ca1-be76c3aa3bf1 | worktree=/home/administrator/projects/Galaxy/worktrees/renderer | branch=feat/render | base=5c75da5 | state=writing | scope=src/render/** + lab.html + dev fixtures; renders the frozen contract, generates nothing
 
-QUEUE | row=3 | integration: mount sim + renderer in main.ts, wire selection and the three views | src=docs/ARCHITECTURE.md
-QUEUE | row=4 | UI: parameter panel, inspector, presets, share URL, keyboard | src=docs/ARCHITECTURE.md
-QUEUE | row=5 | polish + visual QA against the owner's bar; publish the build | src=docs/TESTING.md
+QUEUE | row=3 | integration: mount real generation + renderer in main.ts, app state, selection, three views, transitions | src=docs/ARCHITECTURE.md
+QUEUE | row=4 | UI: parameter panel, inspector, presets, seed/share URL, time controls, keyboard, responsive layout | src=docs/ARCHITECTURE.md
+QUEUE | row=5 | visual polish: deepen galaxy/system/planet frames against the owner's bar; phone + laptop | src=docs/TESTING.md
+QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
 ```
 
 ## State — verified, not believed (2026-10-18T19:40Z)
