@@ -1,23 +1,78 @@
 import './styles.css';
 
+import { GalaxyApp } from './app/controller';
+
 /**
- * Application bootstrap.
+ * Boot: one canvas, one app, one error surface.
  *
- * Day 1 of the build: this only clears the boot overlay. The generator and renderer
- * are built in parallel against `src/sim/types.ts`; integration replaces the body of
- * this file. Keeping it tiny is deliberate — it is the file both branches merge into,
- * so it stays quiet until there is something real to mount.
+ * A missing WebGL2 context is stated plainly instead of swallowed — half of this app
+ * is a renderer, and pretending otherwise would be the silent fallback the project
+ * rules forbid.
  */
 
+declare global {
+  interface Window {
+    __galaxy?: GalaxyApp;
+    __GALAXY_READY__?: boolean;
+  }
+}
+
+const canvas = document.getElementById('scene');
 const boot = document.getElementById('boot');
 const ui = document.getElementById('ui');
 
-if (ui && !ui.firstElementChild) {
-  ui.innerHTML = `
-    <header class="brand">
-      <span class="brand__name">Galaxy</span>
-      <span class="brand__sub">procedural atlas</span>
-    </header>`;
+function fail(message: string, detail?: unknown): void {
+  if (!ui) {
+    document.body.textContent = message;
+    return;
+  }
+  ui.innerHTML = '';
+  const panel = document.createElement('section');
+  panel.className = 'panel boot-error';
+  panel.setAttribute('role', 'alert');
+  panel.innerHTML = `
+    <div class="panel__head"><h2 class="panel__title">Galaxy could not start</h2></div>
+    <div class="panel__body">
+      <p class="boot-error__message"></p>
+      <p class="field__hint boot-error__detail"></p>
+    </div>`;
+  const messageEl = panel.querySelector('.boot-error__message');
+  const detailEl = panel.querySelector('.boot-error__detail');
+  if (messageEl) messageEl.textContent = message;
+  if (detailEl) detailEl.textContent = detail instanceof Error ? detail.message : String(detail ?? '');
+  ui.append(panel);
+  boot?.classList.add('is-gone');
+  console.error('[galaxy] fatal:', message, detail);
 }
 
-boot?.classList.add('is-gone');
+if (!(canvas instanceof HTMLCanvasElement)) {
+  fail('The scene canvas is missing from the page.', 'index.html no longer has #scene.');
+} else {
+  const probe = document.createElement('canvas').getContext('webgl2');
+  if (!probe) {
+    fail(
+      'This browser could not create a WebGL2 context.',
+      'Galaxy needs WebGL2. Try a current Chrome, Firefox or Safari with hardware acceleration enabled.',
+    );
+  } else {
+    try {
+      const app = new GalaxyApp({
+        canvas,
+        onError: (message, detail) => fail(message, detail),
+        onReady: () => {
+          boot?.classList.add('is-gone');
+          window.__GALAXY_READY__ = true;
+        },
+      });
+      window.__galaxy = app;
+
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          app.back();
+        }
+      });
+    } catch (error) {
+      fail('The renderer failed to start.', error);
+    }
+  }
+}
