@@ -3,7 +3,12 @@
 /.gate-lock/
 /worktrees/
 
-# Extend when the stack is chosen (node_modules/, dist/, coverage/, …)
+# Dependencies and build output
 node_modules/
 dist/
+coverage/
 *.log
+
+# Local scratch: probes, screenshots, dev-server logs
+/.probe/
+/shots/

@@ -24,9 +24,9 @@
 #   GATE_LOCK_DIR    the atomic lock                        [<repo>/.gate-lock]
 #   GATE_STALE_MIN   a lock with no live owner older than this is STALE [30]
 #
-# DAY-1 STATE (Galaxy, 2026-10-18): the stack is not chosen yet, so both tiers are
-# UNCONFIGURED and fail LOUDLY with exit 1. They must not silently pass a check that
-# checks nothing: until the two commands below are set, this gate can only be RED.
+# TIERS (Galaxy, stack = TypeScript + Vite + three.js + Vitest):
+#   cheap — `tsc --noEmit`: what can break the deploy. Blocks a push.
+#   full  — the suite, then the production build: makes a change VERIFIED.
 
 set -u
 
@@ -40,9 +40,8 @@ else
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/.." && pwd))"
 fi
 
-GATE_UNCONFIGURED='echo "GATE NOT CONFIGURED: no stack yet — set GATE_CHEAP_CMD / GATE_FULL_CMD in scripts/gate.sh" >&2; exit 1'
-CHEAP_CMD="${GATE_CHEAP_CMD:-$GATE_UNCONFIGURED}"
-FULL_CMD="${GATE_FULL_CMD:-$GATE_UNCONFIGURED}"
+CHEAP_CMD="${GATE_CHEAP_CMD:-pnpm run typecheck}"
+FULL_CMD="${GATE_FULL_CMD:-NODE_OPTIONS=--max-old-space-size=2048 pnpm test && NODE_OPTIONS=--max-old-space-size=2048 pnpm run build}"
 LOG_DIR="${GATE_LOG_DIR:-$REPO_ROOT/.gate-logs}"
 LOCK_DIR="${GATE_LOCK_DIR:-$REPO_ROOT/.gate-lock}"
 STALE_MIN="${GATE_STALE_MIN:-30}"

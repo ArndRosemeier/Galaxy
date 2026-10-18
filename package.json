@@ -1,0 +1,25 @@
+{
+  "name": "galaxy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A procedural galaxy creator: stars, systems, planets, moons, rings and belts — generated from a seed, explorable from whole-galaxy scale down to a single world.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "shoot": "node tools/shoot.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}
