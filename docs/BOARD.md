@@ -8,7 +8,7 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: aceadd1 · 2026-10-18T19:40Z
+reconciled: 5c75da5 · 2026-10-18T19:40Z
 
 SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=dispatching the build
 
