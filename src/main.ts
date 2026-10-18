@@ -1,6 +1,7 @@
 import './styles.css';
 
 import { GalaxyApp } from './app/controller';
+import { mountUI } from './ui';
 
 /**
  * Boot: one canvas, one app, one error surface.
@@ -65,6 +66,11 @@ if (!(canvas instanceof HTMLCanvasElement)) {
         },
       });
       window.__galaxy = app;
+
+      if (ui) {
+        const disposeUI = mountUI(ui, app);
+        window.addEventListener('pagehide', () => disposeUI());
+      }
 
       window.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && !event.defaultPrevented) {
