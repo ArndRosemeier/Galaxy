@@ -1,0 +1,151 @@
+# Galaxy — agent/workspace rules
+
+Galaxy is a new project whose **stack and first slice are not chosen yet** (owner
+designation 2026-10-18: "please be my chief of staff"). What exists on day 1 is the
+process, not the code: a board, a decision ledger, one gate command and a brief
+template, all in this repo. The owner's first work order decides what is built; until
+then this file's only project-specific fact is that the project is empty.
+
+Read the relevant doc under `docs/` before working on an area. If this project keeps
+a **seam index** ("the one way to do X", layer map, gotchas, known debt), start
+every task there — Galaxy has none yet; create `docs/ARCHITECTURE.md` from the
+Toolbox scaffold when the first layer exists.
+
+The full process — roles, the board, verification doctrine, the brief template — is
+in the shared doc `/home/administrator/projects/Toolbox/docs/WAY-OF-WORKING.md`
+(upstream: the Toolbox repo; this project deliberately does not keep a copy, because
+a copied process doc rots). Read it when you are new to this workflow. This file
+holds only what is **binding here**.
+
+## Owner rules for this project
+
+- **None yet.** The owner has not issued a work order for Galaxy. Do not invent one:
+  a session with no owner request reconciles, keeps the record true, and waits.
+
+## Binding engineering rules
+
+1. **No silent fallbacks.** When data, parsing or a step fails, propagate a LOUD
+   error. Forbidden: finalizing an artifact from an empty or failed draft,
+   `catch`-and-continue around parsing, logging an error with no user-visible
+   surface, placeholder values standing in for required data. Defaults are allowed
+   only for genuine user preference or optional enrichment — never to mask a
+   failure.
+2. **Errors must be visible** through the app's one error surface.
+3. **Validate at every boundary.** Machine output is parsed against a schema; a
+   validation failure fails the step. It never becomes empty data.
+4. **Centralize, and keep it simple.** When one idea is implemented in more than one
+   place, make it ONE seam and route callers through it. When you touch an
+   already-distributed pattern, folding it is part of the change — unless that is
+   genuinely more expensive than the defect, in which case say so in writing where
+   the next reader will hit it.
+5. **A cross-cutting discovery starts with the seam question, and the answer is
+   WRITTEN DOWN.** Every brief and every landing report carries ONE greppable line:
+   `COPIES: n→1 — <the seam that now carries it>` when copies were folded, or
+   `COPIES: 1 — checked, no duplication (grepped: <what>)` when the change is
+   genuinely single-site. A brief without it is incomplete; a landing without it is
+   not verified.
+
+## Standing rule: critique the instruction
+
+**The owner's instructions are INTENT, not design.**
+
+1. **Extract the intent first** — the felt problem behind the literal ask.
+2. **Say it when the ask is flawed**, plainly and briefly, with the better route and
+   its reasoning.
+3. **Do not silently substitute.** A different design may replace the asked-for one
+   only when it serves the SAME intent *and* the owner has been told. The owner must
+   always be able to see which decisions were theirs.
+4. **Judge the friction.** Minor imperfections get decided in one line, not debated.
+5. **Route the critique through reality, not taste.** "This breaks X, here is the
+   code that proves it" is a critique; "this feels off" is not.
+6. **Bind briefs to it too.** Every brief tells the writer to report BLOCKED — with
+   evidence — rather than implement something it can prove is wrong, **including
+   when the flaw is in the brief's own design**.
+7. **The decision stays the owner's.** Present the better way once; if the owner
+   reaffirms, execute it well and stop re-arguing.
+
+## Reading the owner's reports
+
+Unusual characters in a pasted report are the **transport**, not a symptom — text can
+be mangled before anything of ours sees it. Do not scope work from a mangled glyph,
+and do not report one as a defect. Diagnose a real encoding problem only from what
+the owner says he **sees on screen**, or from an artifact you can render yourself.
+
+## Parallel writers
+
+Read-only agents always run in parallel. **At most TWO writing agents** may be in
+flight, and only in **separate worktrees** (`git worktree add`) — writers sharing one
+working tree share one git index, and `git commit` commits the whole index, so file
+disjointness does NOT protect the commit phase.
+
+1. **File disjointness applies to source files and CANNOT hold for the docs.** Every
+   landing amends the board and usually the ledger, so two concurrent writers WILL
+   conflict there. The dispatcher assigns the ledger row number in every brief; a
+   writer that still hits a docs conflict resolves it as a mechanical UNION,
+   renumbers its OWN row only, touches nothing of the other landing, proves that with
+   `git diff --name-only`, re-gates on the rebased tree, and pushes.
+2. **A conflict anywhere else** means the disjointness check missed something: STOP
+   and report; do not resolve it.
+3. **Rebase before every push** (`git pull --rebase origin main`), then push. Where
+   the main branch deploys, it is not a staging area.
+4. **Absolute paths in every brief.** Every shell call runs in a fresh shell whose
+   cwd is the session workspace, and file tools resolve relative paths against it —
+   so a writer told to work in a worktree edits the MAIN tree unless every path is
+   absolute.
+5. **Worktrees live INSIDE the repo** (`<repo>/worktrees/<slice>`, gitignored and
+   excluded from lint) — never in `/tmp`, whose behaviour depends on a sandbox mode
+   that is not yours to rely on.
+6. **A writer that cannot finish must COMMIT the coherent partial state on its
+   branch and report BLOCKED.** Uncommitted work dies with the session.
+7. **Cadence contract.** Writers report on LANDING or BLOCKED, nothing in between.
+   The dispatcher waits in silence; a clean tree with no new commit while a writer
+   runs is normal.
+
+## The gate
+
+One command. Run it; do not invent another. See `scripts/gate.sh` for the exit-code
+vocabulary (`0` green · `1` failed · `2` cheap tier only · `9` refused, VOID) and
+`docs/BOARD.md` for how a result is recorded.
+
+- **The cheap tier blocks a push; the expensive tier makes a change VERIFIED.**
+- **A red gate is information, not an obstacle.** Fix the cause; never re-run until
+  green.
+- **Never pipe a check through `tail`/`head`** — it destroys the failing evidence,
+  and the pipeline's exit status becomes the last command's, so unverified work lands
+  under a message claiming a pass.
+- **One expensive check at a time**, enforced by the lock, not by a glance.
+- **Until the stack is chosen, both tiers are UNCONFIGURED and the gate is RED
+  (exit 1) by design.** A gate that cannot check must never report GREEN.
+
+## Host hygiene
+
+The box is shared; the discipline that protects it protects every other session on
+it.
+
+1. **At most two writers in flight.** Count the registry before dispatching.
+2. **No synthetic load, ever.** A flake is proved deterministic by delaying its
+   cause, never by loading the machine.
+3. **Every run carries a memory ceiling**, and one suite runs at a time.
+4. **An interrupted turn's processes are the dispatcher's to reap** — a turn that
+   dies does not kill what it started. The audit includes **browsers** (`chrome`,
+   `chromium`, `headless_shell`, `playwright`), not only test runners.
+5. **Kill by PID captured in a SEPARATE call — never by a pattern in the same
+   shell.** A `for p in $(pgrep -f "<pattern>"); do kill $p; done` one-liner
+   SIGTERMed the shell running it **twice in one session**, and the `[x]` bracket
+   trick fails when the pattern is also literal text in that same argv. Capture
+   (`pgrep -f '<pat>' > pids.txt`), then kill (`xargs -r kill < pids.txt`), then
+   verify with a count that cannot self-match (`ps -eo comm= | grep -c '^chrome$'` —
+   expect `0`).
+6. **A headless browser is a process TREE, and its kill belongs in a `trap`.** ONE
+   headless-Chrome run left **33 Chrome processes** alive — browser, zygote, GPU and
+   renderer children. Killing the launcher does not kill the tree, and a cleanup that
+   runs only on the happy path is skipped entirely when a page fails to render. Start
+   a browser in-turn, kill the tree before you report, on success and failure alike.
+7. **Nothing outlives the writer:** scratch harnesses live under its own worktree,
+   never `/tmp`; every process it starts — a browser included — is foreground or
+   killed before it reports.
+8. **This host also runs the owner's browser.** On 2026-10-18 it carried 15
+   `/opt/google/chrome/chrome` processes in one tree (browser, crashpad, zygotes, GPU,
+   renderers), up to ~8.5 days old. They are the operator's session — the Web GUI at
+   `127.0.0.1:3080` is rendered in them — **not** agent orphans. Never reap `chrome`
+   on this host; audit your own launches by parent PID and start time.

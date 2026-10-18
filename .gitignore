@@ -1,0 +1,9 @@
+# Process machinery — never versioned (see docs/BOARD.md)
+/.gate-logs/
+/.gate-lock/
+/worktrees/
+
+# Extend when the stack is chosen (node_modules/, dist/, coverage/, …)
+node_modules/
+dist/
+*.log
