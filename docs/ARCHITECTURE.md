@@ -94,18 +94,19 @@ Measured with `renderer.info` in the screenshot harness, on software GL (SwiftSh
 - no render target above 2048×2048 except the swapped post chain; total texture
   memory ≤ 256 MB.
 
-Measured at `6d596bc`: galaxy 8 draws / 42.9k points · system 28 draws / 50.1k tris /
-13.4k points · planet 12 draws / 57k tris.
+Measured at `edf07ef`: galaxy 8 draws / 44k points · system 28 draws / 50.1k tris /
+13.4k points · planet 10 draws / 36–46k tris. A seven-planet system with eight moons
+reaches 49 draws / 113k tris — still inside the draw budget, above the old 60k
+triangle line; that line described belts (now point sprites), not the whole frame.
 
-**Documented rendering exaggerations** (all in `src/render/scales.ts`, all deliberate —
-the inspector always shows the true numbers): planet radii in the system view are drawn
-at 3500× and then clamped so discs cannot overlap; the star is floored at 11 px
-photosphere and 58 px corona; ring systems are compressed to ≤ 4 planet radii; orbit
-lines are the true Kepler ellipses. Real scales would render every world invisible.
-
-Real-GPU frame rate is the owner's machine, not this host: software GL here cannot
-measure fps, so performance claims are made about **counts and budgets**, never about
-frames per second.
+**Screen-space floors and ceilings.** Planet, moon, star and ring sizes in the system
+view are solved in SCREEN pixels every frame (`src/render/scales.ts`): planet discs are
+5.5–14 px, moons cap at 0.34 of their planet's drawn radius, the star is floored at an
+11 px photosphere with a 58 px corona, and ring annuli are capped at 2.6 planet radii.
+Bodies are depth-sorted and their discs cannot overlap except at a true line-of-sight
+conjunction, where the floors are wider than the separation; the nearer body occludes.
+In short: planet radii are not drawn to scale at all; the inspector always shows the
+true values.
 
 ## Failure behaviour
 

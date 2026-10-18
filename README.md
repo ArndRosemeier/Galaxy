@@ -5,6 +5,12 @@ takes you to a star system, another click to a world — each with its own physi
 detail, and every one of them generated, never stored.
 
 ![The galaxy view](docs/shots/galaxy.png)
+*One seed, ten parameters, 180 star systems — every star is a real destination.*
+
+| A system | A world |
+| --- | --- |
+| ![A star system](docs/shots/system.png) | ![A world](docs/shots/planet.png) |
+| ![A ringed giant](docs/shots/rings.png) | ![On a phone](docs/shots/phone.png) |
 
 ## What you can do
 
