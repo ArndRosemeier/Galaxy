@@ -8,9 +8,9 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: fa6b8ca · 2026-10-18T21:47Z
+reconciled: 600dbcc · 2026-10-18T21:50Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=publish verified — work complete
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=DELIVERED — published, verified, no writers in flight
 
 OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
@@ -62,6 +62,9 @@ QUEUE | none — the request is delivered. Next owner message is the next work o
   rings dominate ringed giants, drawn planets overlap in wide-span systems.
 - **Overlay accepted** (ledger 10): panels sit over the scene; the free band at 1440 is
   nearly centred, so a lens shift would buy ~45 px.
+
+DELIVERED | 2026-10-18T21:50Z | https://apps.futuremagic.de/galaxy/ | verify=pnpm verify: gate exit 0 (15 files / 117 tests, build 53 modules, bundle 732 kB / 197 kB gzip) then QA 9/9 clean (galaxy/system/planet at laptop and phone width, e2e click, e2e keys, an inhabited world found at runtime) | publish verified by CONTENT (same hashed asset on the public host), hub card enriched | no writers, no worktrees, no branches, lock free
+HOST | the owner's 15-process browser tree observed at 19:21Z (pid 2996104) is gone at 21:50Z; no command in this session killed by pattern (the harness kills only its own process group), so it closed on its own or with the desktop session. The chrome processes seen during QA belong to `tools/shoot.mjs` and are reaped by it.
 
 ## Guards
 
