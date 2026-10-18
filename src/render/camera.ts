@@ -157,6 +157,14 @@ export class CameraRig {
     this.controls.maxPolarAngle = maxPolar;
   }
 
+  /** Vertical field of view, degrees. A view may want a longer lens than another. */
+  setFov(fovDeg: number): void {
+    if (!(fovDeg > 0)) return;
+    if (this.camera.fov === fovDeg) return;
+    this.camera.fov = fovDeg;
+    this.camera.updateProjectionMatrix();
+  }
+
   setAspect(aspect: number): void {
     this.camera.aspect = Math.max(aspect, 1e-4);
     this.camera.updateProjectionMatrix();

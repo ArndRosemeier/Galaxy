@@ -23,6 +23,9 @@ import * as THREE from 'three';
 import type { Atmosphere, PlanetKind, RingSystem, Rgb, SurfaceSpec } from '../sim/types';
 import { GLSL_NOISE, GLSL_RINGS } from './glsl';
 import { hashString } from './rand';
+import { drawnRingRadii } from './scales';
+
+const WHITE = new THREE.Color(1, 1, 1);
 
 const KIND_CODE: Record<PlanetKind, number> = {
   terrestrial: 0,
@@ -82,6 +85,12 @@ uniform vec3 uRingNormal;
 uniform float uRingInner;
 uniform float uRingOuter;
 uniform float uRingOpacity;
+// Fine surface detail is aliasing on a world that is twenty pixels across, so the small
+// views turn it off rather than dithering the globe into a QR code.
+uniform float uFine;
+// Banding frequency multiplier: a world that is ninety pixels across cannot carry a
+// twenty-band barcode without aliasing into chevrons.
+uniform float uBandScale;
 
 varying vec3 vLocal;
 varying vec3 vWorld;
@@ -98,11 +107,32 @@ float heightField(vec3 p) {
 
 // Latitude bands with turbulent shear: the gas-giant recipe. Returns 0..1.
 float bandField(vec3 p) {
-  float warp = fbm3(p * vec3(1.4, 3.4, 1.4) + uSeed * 0.7, 2);
-  float shear = p.y + 0.055 * (warp - 0.5) + 0.03 * sin(p.y * 9.0 + uSeed);
-  float fine = 0.5 + 0.5 * sin(shear * 27.0 + 0.8 * sin(shear * 9.0)) * (0.58 + 0.42 * sin(shear * 58.0 + 1.7));
-  float storm = smoothstep(0.66, 0.90, fbm3(p * 3.2 + 21.0 + uSeed, 3));
-  return clamp(0.14 + fine * 0.70 + storm * 0.18, 0.0, 1.0);
+  float warp = fbm3(p * vec3(1.2, 2.8, 1.2) + uSeed * 0.7, 2);
+  // Latitude, not the sine of it: bands are laid out in latitude, and using p.y gives a
+  // handful of fat stripes instead of a belt-and-zone system.
+  float lat = asin(clamp(p.y, -1.0, 1.0));
+  float shear = lat + 0.085 * (warp - 0.5) + 0.035 * sin(lat * 5.0 + uSeed);
+  // Three band scales, gently sheared: a giant's belts are broad zones with thin edges,
+  // not a barcode.
+  float k = uBandScale;
+  float fine = 0.5 + 0.5 * sin(shear * 21.0 * k + 0.85 * sin(shear * 6.0 * k)) * (0.74 + 0.18 * sin(shear * 46.0 * k + 1.7));
+  float storm = smoothstep(0.62, 0.92, fbm3(p * 2.6 + 21.0 + uSeed, 3));
+  return clamp(0.22 + fine * 0.52 + storm * 0.20, 0.0, 1.0);
+}
+
+// One storm: an oval rim around a slightly darker interior, in latitude/longitude.
+// The rim mask is 0..1 and is tinted by the caller.
+float stormRim(vec3 p, float lat0, float lon0, float wLat, float wLon) {
+  float lat = asin(clamp(p.y, -1.0, 1.0));
+  float lon = atan(p.z, p.x);
+  float dlon = lon - lon0;
+  dlon = dlon - 6.283185 * floor(dlon / 6.283185 + 0.5);
+  dlon *= cos(clamp(lat, -1.5, 1.5));
+  float dlat = (lat - lat0) / wLat;
+  float dlonn = dlon / wLon;
+  float inner = exp(-(dlat * dlat + dlonn * dlonn));
+  float shell = exp(-(pow(dlat / 1.55, 2.0) + pow(dlonn / 1.45, 2.0)));
+  return clamp((shell - inner * 0.55) * 2.2, 0.0, 1.0);
 }
 
 vec3 palette(float h) {
@@ -121,6 +151,9 @@ void main() {
   float h = heightField(p);
   float band = bandField(p);
   float relief = mix(h, band, uBandiness * 0.88);
+  // A gas giant's belts have edges. A gentle S-curve on the field gives the palette
+  // somewhere to change tone without turning into stripes.
+  relief = clamp(0.5 + (relief - 0.5) * (1.0 + 0.45 * float(uGiant)), 0.0, 1.0);
 
   // --- land / sea ---------------------------------------------------------
   float seaLevel = mix(0.30, 0.72, uCoverage);
@@ -130,8 +163,13 @@ void main() {
   vec3 surf;
   if (uGiant == 1) {
     surf = palette(relief);
-    // Thin bright belt edges keep the bands from reading as flat stripes.
-    surf *= 0.86 + 0.28 * smoothstep(0.45, 0.55, abs(fract(relief * 7.0) - 0.5));
+    // A gas giant is pastel, not poster paint: pull 40% of the chroma out of the palette
+    // and keep only a whisper of belt-edge contrast.
+    float luma = dot(surf, vec3(0.299, 0.587, 0.114));
+    surf = mix(vec3(luma), surf, 0.60);
+    // fract() is discontinuous, and a discontinuity in a shading term at low resolution
+    // is a chevron; the smooth sine is the same modulation without the seam.
+    surf *= 0.93 + 0.14 * smoothstep(0.42, 0.58, 0.5 + 0.5 * sin(relief * 37.7));
   } else {
     surf = palette(relief);
     vec3 shallow = mix(uWater * 1.35, uLow * 0.55, 0.22);
@@ -149,7 +187,17 @@ void main() {
   surf = mix(surf, uHigh * 0.9, smoothstep(0.60, 0.88, h) * 0.40 * land);
   surf = mix(surf, uLow, smoothstep(0.44, 0.30, h) * 0.30 * land);
   surf *= mix(1.0, 0.72 + 0.52 * landTint, land);
-  surf *= 0.9 + 0.2 * vnoise(p * 24.0 + uSeed);
+  surf *= 1.0 - uFine * 0.12 * (1.0 - vnoise(p * 24.0 + uSeed));
+
+  // --- storm ovals (giants only) ------------------------------------------
+  if (uGiant == 1) {
+    float s1 = stormRim(p, 0.38 + uSeed * 0.05, uSeed * 1.7, 0.055, 0.16);
+    float s2 = stormRim(p, -0.29 + uSeed * 0.03, uSeed * 2.9 + 1.2, 0.045, 0.13);
+    float s3 = stormRim(p, 0.10 + uSeed * 0.02, uSeed * 4.3 + 2.4, 0.032, 0.09);
+    surf = mix(surf, surf * vec3(1.22, 0.90, 0.78), clamp(s1 * 0.85, 0.0, 1.0));
+    surf = mix(surf, surf * vec3(0.86, 0.92, 1.10), clamp(s2 * 0.55, 0.0, 1.0));
+    surf = mix(surf, surf * vec3(1.15, 0.95, 0.86), clamp(s3 * 0.45, 0.0, 1.0));
+  }
 
   // --- ice caps -----------------------------------------------------------
   float capNoise = (fbm3(p * 4.5 + 4.0 + uSeed, 3) - 0.5) * 0.16;
@@ -166,28 +214,36 @@ void main() {
   vec3 grad = sign(det) * (dFdx(relief) * r1 + dFdy(relief) * r2);
   // Water is smooth: only land gets the full relief bump, or the seafloor turns the
   // ocean into marbled paint. A whisper of bump keeps the water from looking like glass.
-  vec3 Nb = normalize(abs(det) * N - grad * (uRoughness * (0.08 + 0.92 * land)));
+  vec3 Nb = normalize(abs(det) * N - grad * (uRoughness * uFine * (0.08 + 0.92 * land)));
   float diffuse = max(dot(Nb, L), 0.0);
-  float day = smoothstep(-0.12, 0.30, dot(N, L));
-  diffuse *= day * day;
+  // The terminator is a band of twilight, not a knife edge — but it still has to be a
+  // *terminator*: too wide a fade flattens the phase into a flat disc.
+  float day = smoothstep(-0.16, 0.24, dot(N, L));
+  diffuse *= day;
 
   // --- ring shadow on the surface ----------------------------------------
+  // Analytic, with a penumbra: the shadow's edges are softened over a third of the ring
+  // annulus so it reads as light filtered through dust, never as a painted black bar.
   float ringShade = 1.0;
   if (uRingOuter > 0.0) {
     float denom = dot(L, uRingNormal);
     // Grazing light makes the projected shadow degenerate; skip it rather than paint
-    // a false black band across the planet.
-    if (abs(denom) > 0.055) {
+    // a false band across the planet.
+    if (abs(denom) > 0.04) {
       float t = dot(uCenter - vWorld, uRingNormal) / denom;
       if (t > 0.0 && t < 1e9) {
         vec3 hit = vWorld + L * t;
         vec3 rel = hit - uCenter - uRingNormal * dot(hit - uCenter, uRingNormal);
         float rr = length(rel);
-        if (rr > uRingInner && rr < uRingOuter) {
-          float pat = ringPattern((rr - uRingInner) / max(uRingOuter - uRingInner, 1e-5));
-          float soft = smoothstep(0.0, 0.35, abs(denom));
-          ringShade = 1.0 - 0.62 * soft * uRingOpacity * (0.35 + 0.65 * pat);
-        }
+        float span = max(uRingOuter - uRingInner, 1e-5);
+        float rt = (rr - uRingInner) / span;
+        float soft = smoothstep(0.0, 0.30, abs(denom));
+        float penumbra = smoothstep(0.0, 0.06, rt) * (1.0 - smoothstep(0.94, 1.05, rt));
+        float density = ringDensity(clamp(rt, 0.0, 1.0));
+        ringShade = 1.0 - 0.42 * soft * uRingOpacity * density * penumbra;
+        // A narrow extra dimming right at the dense inner ring, which is what a real
+        // ring shadow looks like on a cloud deck.
+        ringShade *= 1.0 - 0.22 * soft * uRingOpacity * smoothstep(0.10, 0.25, density) * penumbra;
       }
     }
   }
@@ -211,12 +267,19 @@ void main() {
   lit += uStarColor * iceGlint * uStarIntensity * day;
 
   // --- night side: cities, lava ------------------------------------------
-  float night = 1.0 - smoothstep(-0.24, 0.06, dot(N, L));
+  // Strictly the night side: at the terminator the city glow fades out, and it never
+  // reaches the lit limb (flare on the day side was a reported defect).
+  float night = smoothstep(0.04, -0.20, dot(N, L));
   if (uNightLights > 0.001) {
-    float cluster = smoothstep(0.55, 0.80, fbm3(p * 13.0 + 5.0, 3));
-    float sparkle = smoothstep(0.45, 0.80, fbm3(p * 42.0 + 9.0, 2));
-    float cities = cluster * sparkle * land * uNightLights * night;
-    lit += vec3(1.0, 0.68, 0.34) * cities * 2.2;
+    // Three tight scales: a continent-sized region of settlement, a country-sized
+    // cluster, and the individual lights. Anything smoother reads as gold paint.
+    float region = smoothstep(0.52, 0.82, fbm3(p * 9.0 + 5.0, 3));
+    float cluster = smoothstep(0.60, 0.86, fbm3(p * 26.0 + 9.0, 3));
+    float spark = smoothstep(0.68, 0.92, fbm3(p * 64.0 + 3.0, 2));
+    float cities = region * cluster * spark * land * uNightLights * night;
+    lit += vec3(1.0, 0.72, 0.38) * cities * 2.6;
+    // A faint amber wash under the clusters: the glow of a city seen from orbit.
+    lit += vec3(0.55, 0.32, 0.12) * region * cluster * land * uNightLights * night * 0.10;
   }
   if (uKind == 4) {
     float crack = 1.0 - abs(fbm3(p * 4.6 + uSeed, 4) * 2.0 - 1.0);
@@ -260,32 +323,40 @@ varying vec3 vWorld;
 varying vec3 vNormalWorld;
 void main() {
   vec3 p = normalize(vLocal);
-  float drift = uTime * 0.004;
-  // Domain-warped fbm at a higher frequency than the surface: clouds are weather, not
-  // continents. Two warps give the stretched, banded look of a real cloud deck.
-  vec3 q = p * vec3(4.1, 2.9, 4.1) + vec3(drift, 0.0, drift * 0.55) + uSeed * 0.27;
+  float drift = uTime * 0.0035;
+  // Two scales, both stretched along the flow: a broad weather-system mask and fine
+  // streaks inside it. The old version thresholded one blobby field, which painted
+  // continents of cloud instead of wisps.
+  vec3 flow = p * vec3(4.4, 2.6, 4.4) + vec3(drift, 0.0, drift * 0.4) + uSeed * 0.21;
   vec3 warp = vec3(
-    vnoise(p * 2.3 + 5.0),
-    vnoise(p * 2.6 + 9.0),
-    vnoise(p * 2.9 + 13.0)
+    vnoise(p * 2.6 + 5.0),
+    vnoise(p * 2.2 + 9.0),
+    vnoise(p * 3.1 + 13.0)
   ) - 0.5;
-  float c = fbm3(q + warp * 0.55, 5);
-  float band = 0.5 + 0.5 * sin(p.y * 26.0 + fbm3(p * 2.0 + 9.0, 2) * 5.0);
-  c = mix(c, 0.55 * c + 0.45 * band, uBanded);
-  float threshold = mix(0.72, 0.40, uCloudiness);
-  float cover = smoothstep(threshold, threshold + 0.17, c);
-  if (cover < 0.004) discard;
+  float system = fbm3(flow * 1.0 + warp * 0.55, 4);
+  // The streaks are stretched along the flow: that anisotropy is what reads as wind,
+  // and it is the difference between a wisp and a torn-paper shard.
+  vec3 detailCoord = flow * vec3(3.6, 1.5, 3.6) + warp * 1.25 + 17.0;
+  float streaks = fbm3(detailCoord, 3);
+  // Latitude bands organise the streaks: trade winds, not noise.
+  float band = 0.5 + 0.5 * sin(p.y * 15.0 + fbm3(p * 1.7 + 3.0, 2) * 6.0);
+  float c = system * 0.52 + streaks * 0.36 + band * 0.12 * uBanded;
+  float threshold = mix(0.62, 0.36, uCloudiness);
+  // A narrow window is what makes an edge wispy instead of a blob edge.
+  float cover = smoothstep(threshold - 0.02, threshold + 0.105, c);
+  cover *= 0.45 + 0.55 * smoothstep(threshold - 0.10, threshold + 0.10, system);
+  if (cover < 0.003) discard;
 
   vec3 N = normalize(vNormalWorld);
   vec3 L = normalize(uStarDir);
   vec3 V = normalize(cameraPosition - vWorld);
-  float day = smoothstep(-0.14, 0.30, dot(N, L));
-  float limb = pow(1.0 - abs(dot(N, V)), 2.0);
-  float thickness = 0.55 + 0.45 * smoothstep(threshold, threshold + 0.25, c);
-  vec3 col = uCloudColor * uStarColor * (0.035 + day * 1.15) * uStarIntensity;
-  col *= 0.82 + 0.18 * thickness;
-  float alpha = cover * thickness * (0.58 + 0.22 * limb) * (0.35 + 0.65 * day);
-  gl_FragColor = vec4(col, alpha);
+  float day = smoothstep(-0.30, 0.50, dot(N, L));
+  float limb = pow(1.0 - abs(dot(N, V)), 2.2);
+  float thickness = 0.45 + 0.55 * smoothstep(threshold, threshold + 0.22, c);
+  vec3 col = uCloudColor * uStarColor * (0.02 + day * 1.05) * uStarIntensity;
+  col *= 0.86 + 0.14 * thickness;
+  float alpha = cover * (0.26 + 0.34 * thickness) * (0.40 + 0.60 * day) * (1.0 + 0.30 * limb);
+  gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.92));
 }
 `;
 
@@ -349,30 +420,42 @@ varying float vT;
 varying vec3 vWorld;
 varying vec3 vNormalWorld;
 void main() {
-  float pat = ringPattern(vT);
-  float edge = smoothstep(0.0, 0.06, vT) * (1.0 - smoothstep(0.94, 1.0, vT));
-  float alpha = uOpacity * (0.22 + 0.78 * pat) * edge;
-  if (alpha < 0.004) discard;
+  float density = ringDensity(vT);
+  // A ring does not end on a line: it thins out over its outer tenth and has a soft
+  // inner edge, which is half of what stops it reading as a solid ribbon.
+  float edge = smoothstep(0.0, 0.045, vT) * (1.0 - smoothstep(0.90, 1.0, vT));
+  float alpha = uOpacity * (0.08 + 0.92 * density) * edge * 0.82;
+  if (alpha < 0.003) discard;
 
   vec3 N = normalize(vNormalWorld);
   vec3 L = normalize(uStarDir);
-  float grazing = 0.35 + 0.65 * abs(dot(N, L));
-  vec3 col = uRingColor * uStarColor * (0.35 + 0.85 * pat) * grazing * uStarIntensity;
+  vec3 V = normalize(cameraPosition - vWorld);
+  // Particles scatter: bright when lit, and brighter still looking through them into
+  // the star (forward scattering).
+  float lit = 0.42 + 0.58 * abs(dot(N, L));
+  float forward = pow(max(dot(-V, L), 0.0), 3.0);
+  // Desaturate the data colour toward neutral ice: rings are pale, whatever tint the
+  // generator picked for the debris.
+  vec3 tint = mix(uRingColor, vec3(0.94, 0.92, 0.88), 0.72);
+  vec3 tinted = mix(tint * vec3(1.06, 1.00, 0.90), tint * vec3(0.93, 0.97, 1.04), smoothstep(0.15, 0.95, vT));
+  vec3 col = tinted * uStarColor * (0.30 + 0.70 * density) * lit * uStarIntensity;
+  col += uStarColor * forward * density * 0.35;
 
-  // The planet's shadow, cast across the ring plane: an analytic sphere shadow.
+  // The planet's shadow, cast across the ring plane: an analytic sphere shadow with a
+  // penumbra, so the rings darken through the shadow instead of snapping to black.
   vec3 toPlanet = uCenter - vWorld;
   float along = dot(toPlanet, L);
   if (along > 0.0) {
     float closest = length(vWorld + L * along - uCenter);
-    float shade = smoothstep(uPlanetRadius * 0.97, uPlanetRadius * 1.10, closest);
-    col *= mix(0.10, 1.0, shade);
+    float shade = smoothstep(uPlanetRadius * 0.90, uPlanetRadius * 1.36, closest);
+    col *= mix(0.42, 1.0, shade);
   }
 
   gl_FragColor = vec4(col, alpha);
 }
 `;
 
-export type WorldDetail = 'system' | 'planet';
+export type WorldDetail = 'system' | 'moon' | 'planet';
 
 export interface WorldOptions {
   readonly surface: SurfaceSpec;
@@ -388,6 +471,13 @@ export interface WorldOptions {
   readonly clouds: boolean;
   /** Extra emissive cities override; defaults to the SurfaceSpec value. */
   readonly nightLights?: number;
+  /**
+   * How far the host star's colour is white-balanced toward neutral for this world,
+   * 0..1. The system view uses 0 (a red star really does light its planets red); the
+   * planet view uses ~0.5, because a portrait of a world should show the world's own
+   * palette, exactly as a camera's white balance would.
+   */
+  readonly lightBalance?: number;
 }
 
 /** Uniform objects, keyed by the GLSL uniform names the surface shader declares. */
@@ -464,14 +554,19 @@ export class WorldVisual {
   private readonly ringInner: number;
   private readonly ringOuter: number;
   private readonly ringNormal = new THREE.Vector3(0, 1, 0);
+  private readonly lightBalance: number;
+  private readonly balancedLight = new THREE.Color(1, 1, 1);
   private readonly worldQuat = new THREE.Quaternion();
   readonly tiltRadians: number;
+  /** Drawn scale applied on top of the given radius (1 = as generated). */
+  private drawnScale = 1;
 
   constructor(options: WorldOptions) {
     const { surface, radius, detail, atmosphere, rings } = options;
     const kindCode = KIND_CODE[surface.kind];
     const giant = surface.kind === 'gas' || surface.kind === 'icegiant';
     const planetDetail = detail === 'planet';
+    const moonDetail = detail === 'moon';
     const seed = (surface.seed >>> 0) / 4294967296;
     const seedOffset = seed * 977;
     const hash = hashString(options.id);
@@ -496,9 +591,14 @@ export class WorldVisual {
     const atmosphereAmount = atmosphere ? Math.min(Math.max(atmosphere.opacity, 0), 1) : 0;
 
     this.radius = radius;
-    const surfaceSegments = planetDetail ? [160, 80] : [36, 22];
-    const cloudSegments = planetDetail ? [96, 54] : [28, 18];
-    const atmoSegments = planetDetail ? [96, 54] : [32, 20];
+    this.lightBalance = Math.min(Math.max(options.lightBalance ?? 0, 0), 1);
+    // `fine` scales the high-frequency detail (and the screen-space relief bump) with
+    // how many pixels the world actually occupies: a 20-pixel globe cannot show 24-cycle
+    // noise, it can only alias into a QR code.
+    const fine = planetDetail ? 1 : moonDetail ? 0.55 : 0.16;
+    const surfaceSegments = planetDetail ? [160, 80] : moonDetail ? [96, 56] : [64, 40];
+    const cloudSegments = planetDetail ? [96, 54] : moonDetail ? [64, 36] : [28, 18];
+    const atmoSegments = planetDetail ? [96, 54] : moonDetail ? [64, 36] : [32, 20];
 
     const surfaceGeometry = new THREE.SphereGeometry(radius, surfaceSegments[0]!, surfaceSegments[1]!);
     this.geometries.push(surfaceGeometry);
@@ -512,12 +612,14 @@ export class WorldVisual {
         uTurbulence: { value: surface.turbulence },
         uBandiness: { value: giant ? Math.max(surface.bandiness, 0.75) : surface.bandiness },
         uRoughness: { value: surface.roughness },
+        uFine: { value: fine },
+        uBandScale: { value: planetDetail ? 1 : moonDetail ? 0.8 : 0.42 },
         uCoverage: { value: coverage },
         uIceLine: { value: ice.line },
         uIceStrength: { value: ice.strength },
         uNightLights: { value: options.nightLights ?? surface.nightLights },
-        uOctaves: { value: planetDetail ? 5 : 3 },
-        uWarpOctaves: { value: planetDetail ? 3 : 2 },
+        uOctaves: { value: planetDetail ? 5 : moonDetail ? 4 : 3 },
+        uWarpOctaves: { value: planetDetail ? 3 : moonDetail ? 3 : 2 },
         ...colors,
         uHasWater: { value: surface.colors.water ? 1 : 0 },
         uStarDir: { value: new THREE.Vector3(1, 0, 0) },
@@ -578,7 +680,7 @@ export class WorldVisual {
             uColor: { value: atmosphereColor },
             uStarDir: { value: new THREE.Vector3(1, 0, 0) },
             uOpacity: { value: Math.min(Math.max(atmosphere.opacity, 0.05), 1) },
-            uPower: { value: planetDetail ? 4.3 : 3.4 },
+            uPower: { value: planetDetail ? 4.3 : moonDetail ? 3.8 : 3.4 },
             uIntensity: { value: planetDetail ? 0.8 : 0.8 },
           },
           transparent: true,
@@ -599,8 +701,12 @@ export class WorldVisual {
     }
 
     if (rings) {
-      this.ringInner = (rings.innerRadiusKm / Math.max(options.planetRadiusKm, 1)) * radius;
-      this.ringOuter = (rings.outerRadiusKm / Math.max(options.planetRadiusKm, 1)) * radius;
+      const drawn = drawnRingRadii(
+        rings.innerRadiusKm / Math.max(options.planetRadiusKm, 1),
+        rings.outerRadiusKm / Math.max(options.planetRadiusKm, 1),
+      );
+      this.ringInner = drawn.inner * radius;
+      this.ringOuter = drawn.outer * radius;
       const ringGeo = ringGeometry(this.ringInner, this.ringOuter, 192);
       this.geometries.push(ringGeo);
       this.ringMaterial = new THREE.ShaderMaterial({
@@ -635,6 +741,30 @@ export class WorldVisual {
     }
   }
 
+  /**
+   * Scale the drawn world, in place, without moving it.
+   *
+   * The system view needs a minimum *on-screen* size for a world (a real one is a
+   * fraction of a pixel at a camera that fits the orbits); the ring uniforms are in world
+   * units, so they have to follow the scale or the ring shadow lands in the wrong place.
+   */
+  setScale(scale: number): void {
+    if (!(scale > 0) || !Number.isFinite(scale)) return;
+    if (scale === this.drawnScale) return;
+    this.drawnScale = scale;
+    this.group.scale.setScalar(scale);
+    if (this.ringMaterial) {
+      this.ringMaterial.uniforms.uPlanetRadius!.value = this.radius * scale;
+      this.surfaceMaterial.uniforms.uRingInner!.value = this.ringInner * scale;
+      this.surfaceMaterial.uniforms.uRingOuter!.value = this.ringOuter * scale;
+    }
+  }
+
+  /** The scale currently applied (1 if never set). */
+  get scale(): number {
+    return this.drawnScale;
+  }
+
   /** Set the spin phase of the world, in radians (negative = retrograde). */
   setSpin(angle: number): void {
     this.surface.rotation.y = angle;
@@ -656,9 +786,13 @@ export class WorldVisual {
     this.tilt.getWorldQuaternion(this.worldQuat);
     this.ringNormal.set(0, 1, 0).applyQuaternion(this.worldQuat).normalize();
 
+    // White balance: mix the star's tint toward neutral before it lights the world.
+    this.balancedLight.copy(starColor).lerp(WHITE, this.lightBalance);
+    const light = this.balancedLight;
+
     const su = this.surfaceMaterial.uniforms;
     (su.uStarDir!.value as THREE.Vector3).copy(starDir).normalize();
-    (su.uStarColor!.value as THREE.Color).copy(starColor);
+    (su.uStarColor!.value as THREE.Color).copy(light);
     su.uStarIntensity!.value = starIntensity;
     (su.uCenter!.value as THREE.Vector3).copy(center);
     (su.uRingNormal!.value as THREE.Vector3).copy(this.ringNormal);
@@ -666,7 +800,7 @@ export class WorldVisual {
     if (this.cloudMaterial) {
       const cu = this.cloudMaterial.uniforms;
       (cu.uStarDir!.value as THREE.Vector3).copy(starDir).normalize();
-      (cu.uStarColor!.value as THREE.Color).copy(starColor);
+      (cu.uStarColor!.value as THREE.Color).copy(light);
       cu.uStarIntensity!.value = starIntensity;
       cu.uTime!.value = time % 1000;
     }
@@ -679,7 +813,7 @@ export class WorldVisual {
     if (this.ringMaterial) {
       const ru = this.ringMaterial.uniforms;
       (ru.uStarDir!.value as THREE.Vector3).copy(starDir).normalize();
-      (ru.uStarColor!.value as THREE.Color).copy(starColor);
+      (ru.uStarColor!.value as THREE.Color).copy(light);
       ru.uStarIntensity!.value = starIntensity;
       (ru.uCenter!.value as THREE.Vector3).copy(center);
     }

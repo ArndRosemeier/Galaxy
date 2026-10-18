@@ -133,15 +133,72 @@ export function planetViewMoonRadius(moonRadiusKm: number, planetRadiusKm: numbe
 }
 
 /**
- * A belt body's drawn radius in AU, as a fraction of the belt span (decorative only).
+ * A belt body is drawn as a point sprite sized in **pixels**, not in AU.
  *
- * True belt bodies are 10-1000 km (1e-7..7e-6 AU): at any camera that fits a system
- * they are far below a pixel. A belt body is drawn a few hundredths of an AU across so the ring
- * reads as granular instead of invisible; the belt's true extent and count are still
- * what the data says.
+ * True belt bodies are 10-1000 km (1e-7..7e-6 AU): at any camera that fits a system they
+ * are far below a pixel. Scaling them in AU is what turned the belt into a ring of
+ * boulders in the frame the owner rejected — the size then grew with the frame like a
+ * planet's, instead of staying dust. A fixed on-screen size is both cheaper (one point
+ * sprite is no triangles) and the honest picture of "dust at this distance".
  */
-export const BELT_BODY_RADIUS_FRACTION = 0.018;
+export const BELT_BODY_MIN_PX = 1.0;
+export const BELT_BODY_MAX_PX = 2.1;
 
-/** Hard cap on instanced belt bodies: 3 000 × 20 triangles = 60 000 triangles (budget). */
-export const MAX_BELT_BODIES = 3000;
+/** Hard cap on belt point sprites per belt (points, so the 60k-triangle budget is free). */
+export const MAX_BELT_BODIES = 24_000;
+
+// ---------------------------------------------------------------------------
+// System view: minimum on-screen sizes (the frame must read as a system)
+// ---------------------------------------------------------------------------
+
+/**
+ * The star is the subject of a system view, so it has a floor in *pixels*.
+ *
+ * At a camera that fits the planets, a true-to-scale stellar photosphere is a fraction
+ * of a pixel — the defect the owner reported was a frame in which the star could not be
+ * found at all. The photosphere is drawn at least this many pixels in radius, and the
+ * corona at least `MIN_STAR_CORONA_PX`, so the star always reads as the brightest thing
+ * in the frame. Below the floor the drawn radius still follows the true one.
+ */
+export const MIN_STAR_PHOTOSPHERE_PX = 11;
+export const MIN_STAR_CORONA_PX = 58;
+
+/**
+ * Planets get a floor too: at a system fit, an exaggerated Earth is one or two pixels
+ * and cannot be found, let alone clicked. Drawings are scaled up (never past
+ * `MAX_PLANET_SCALE`) around their own centre; their *positions* are untouched.
+ */
+export const MIN_PLANET_RADIUS_PX = 5.5;
+export const MAX_PLANET_SCALE = 3;
+
+/** The system view frames the planetary system, with this margin around the outer orbit. */
+export const SYSTEM_FRAME_MARGIN = 1.15;
+
+// ---------------------------------------------------------------------------
+// Planet view: rings are compressed (documented lie)
+// ---------------------------------------------------------------------------
+
+/**
+ * **RING_DRAWN_MAX = 4.0.**
+ *
+ * Real ring systems run to many planet radii: the gas giant in the default system has
+ * rings out to **5.99 R**, and drawing that true-to-scale dwarfs the world into a dot in
+ * the middle of a record (the owner's "over-dominant scale"). The drawn annulus is
+ * therefore compressed about the planet centre so its outer edge is never more than
+ * 4 planet radii, with the inner edge carried along proportionally so the ring keeps its
+ * width ratio and order, and never starts inside the planet.
+ *
+ * The ring's *shadow* and the planet's shadow on the ring both read these same drawn
+ * radii, so nothing can disagree about where the rings are. `RingSystem` itself is
+ * untouched: the inspector still shows the true radii.
+ */
+export const RING_DRAWN_MAX = 4.0;
+
+/** Drawn ring radii in planet radii, from the generated ones. */
+export function drawnRingRadii(innerRatio: number, outerRatio: number): { inner: number; outer: number } {
+  const outer = Math.max(outerRatio, 1.02);
+  const factor = outer > RING_DRAWN_MAX ? RING_DRAWN_MAX / outer : 1;
+  const inner = Math.max(1.14, innerRatio * factor);
+  return { inner: Math.min(inner, outer * 0.94), outer: Math.max(outer * factor, inner * 1.06) };
+}
 

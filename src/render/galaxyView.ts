@@ -1,16 +1,32 @@
 /**
  * The galaxy view — the first ten seconds.
  *
- * What the frame must say instantly: a bright core, logarithmic arms, dark dust lanes,
- * and hundreds of individually coloured stars. The arms are not invented here: they
- * are the *actual* `SystemStub.position` values, splatted into a small density map and
- * turned into a soft emission field by a shader. That is the whole trick — the glow
- * cannot disagree with the stars, because it is a smoothed picture of them.
+ * What the frame must say instantly: a bright nucleus with a smooth cusp, logarithmic
+ * arms, dark dust lanes, a warm bulge, cool young light in the arms, and stars that
+ * read as *points*. The arms are not invented here: they are the actual
+ * `SystemStub.position` values, splatted into a small density map and turned into a
+ * soft emission field by a shader. The glow cannot disagree with the stars, because it
+ * is a smoothed picture of them.
  *
- * Draw calls (budget ≤ 8, including the 4-call post chain):
- *   background starfield (1) · galaxy emission plane (1) · star sprites (1) · markers (1)
+ * ## What is data and what is decoration
+ *  - **Data** (`src/sim`): the systems' positions, colours and brightness. Every
+ *    pickable star sprite uses `SystemStub.color`, unchanged in hue, and its true
+ *    brightness.
+ *  - **Decoration** (this file, seeded): the faint field of unresolved stars and the
+ *    H-II knots that fill the arms out, the dust filaments, and the background
+ *    starfield. They never move independently of the data and they are never
+ *    pickable — they are the long exposure, not new systems.
  *
- * Points (budget ≤ 400 000): a few hundred stars + a few thousand background stars.
+ * ## Draw calls (budget ≤ 8, including the 4-call post chain)
+ *   background starfield (1) · galaxy emission plane (1) · star + field + knots (1) ·
+ *   markers (1). Points: a few tens of thousand, far below the 400k budget.
+ *
+ * ## Why the sprites are not perspective-scaled
+ * A star is a point source: its apparent size is the instrument's point-spread
+ * function, not its distance. Sizing the sprites in CSS pixels is therefore both the
+ * cheaper and the truer choice — zooming the camera in changes what is around the star,
+ * never the star into a disc. (The previous version scaled sprites by distance, which
+ * is how ten-pixel white discs happened.)
  */
 
 import * as THREE from 'three';
@@ -18,8 +34,9 @@ import type { Galaxy, SystemStub } from '../sim/types';
 import { mulberry32, hashString } from './rand';
 import { GLSL_NOISE } from './glsl';
 import { createStarfield, type SkyField } from './sky';
+import { GALAXY, chroma, linear } from './palette';
 
-const DENSITY_SIZE = 640;
+const DENSITY_SIZE = 720;
 
 const DISC_VERT = /* glsl */ `
 varying vec2 vP;
@@ -29,111 +46,153 @@ void main() {
 }
 `;
 
+/**
+ * The emission plane. Everything here is *light*: the nuclear cusp, the bulge, the arm
+ * ridges, the young blue light in them, a little pink star formation, then extinction by
+ * dust drawn on top, and finally the galaxy's own faint halo, which is what keeps the
+ * sky off pure black.
+ */
 const DISC_FRAG = /* glsl */ `
 ${GLSL_NOISE}
 uniform sampler2D uDensity;
 uniform float uRadius;
 uniform float uCoreDensity;
-uniform vec3 uCoreColor;
+uniform vec3 uNucleusColor;
+uniform vec3 uBulgeColor;
 uniform vec3 uArmColor;
-uniform vec3 uHazeColor;
+uniform vec3 uArmEdgeColor;
+uniform vec3 uKnotColor;
 uniform vec3 uDustColor;
+uniform vec3 uHaloColor;
 varying vec2 vP;
-
-vec2 rotate2(vec2 v, float a) {
-  float c = cos(a);
-  float s = sin(a);
-  return vec2(v.x * c - v.y * s, v.x * s + v.y * c);
-}
 
 void main() {
   float r = length(vP) / uRadius;
-  if (r > 1.2) discard;
+  if (r > 2.35) discard;
+  vec3 fp = vec3(vP.x / uRadius, vP.y / uRadius, 1.31);
+
+  // The galaxy's own halo: a broad, extremely faint gradient. Deliberately not
+  // noise-driven, so it can never read as a cloud — it only keeps the background from
+  // being a flat void, which is what a photograph of anything looks like.
+  float haloShape = exp(-r * 0.95) * (1.0 - smoothstep(0.9, 2.2, r));
+  haloShape = max(haloShape, 0.0);
+  vec3 halo = uHaloColor * haloShape * 0.016;
+  halo += uArmEdgeColor * exp(-r * 2.6) * 0.005 * (1.0 - smoothstep(1.0, 1.6, r));
+
+  // Outside the disc there is nothing but the halo. Cheap path: most of the frame.
+  if (r > 1.20) {
+    gl_FragColor = vec4(halo, 1.0);
+    return;
+  }
 
   vec2 uv = vP / (2.0 * uRadius) + 0.5;
   vec4 density = texture2D(uDensity, uv);
-  float arms = density.r;
-  float armGlow = density.g;
-  float bulge = density.b;
-  float dustMap = density.a;
+  float armGate = density.r;
+  float glowGate = density.g;
+  float bulgeTex = density.b;
+  float dustGate = density.a;
 
-  vec3 fp = vec3(vP.x / uRadius, vP.y / uRadius, 1.31);
-  float filament = fbm3(fp * vec3(11.0, 14.0, 2.6) + 3.0, 4);
-  float dust = smoothstep(0.06, 0.80, dustMap) * (0.30 + 0.95 * filament);
-  dust *= smoothstep(0.03, 0.12, r) * (1.0 - smoothstep(0.74, 1.02, r));
+  // Noise fades out of the nucleus. A cusp is smooth; a noisy cusp is the torn hole the
+  // first version of this shader drew.
+  float calm = smoothstep(0.012, 0.15, r);
+  // Only LOW frequencies belong in the emission. A galaxy's granularity is resolved
+  // stars, and those are drawn as sprites in their own draw call; high-frequency noise
+  // here would paint ten-pixel soft blobs over them — "snow", the reported defect.
+  float cloud = fbm3(fp * vec3(4.2, 5.0, 1.5) + 9.0, 4);
+  float mid = fbm3(fp * vec3(11.0, 13.0, 2.6) + 6.0, 3);
+  float haze = fbm3(fp * vec3(26.0, 31.0, 4.0) + 4.0, 2);
 
-  // Core: an exponential bulge plus the splatted light of the inner stars.
-  float coreGlow = exp(-pow(max(r, 0.0), 1.18) * 11.0) * (0.5 + 0.8 * uCoreDensity);
-  coreGlow += bulge * 0.36;
+  // --- nucleus and bulge: closed-form, smooth, warm -------------------------
+  float nucleus = exp(-pow(r / 0.018, 1.10));
+  float bulge = exp(-pow(r / 0.088, 1.32));
+  vec3 colour = uNucleusColor * nucleus * 3.0;
+  colour += uBulgeColor * bulge * (0.42 + 0.50 * uCoreDensity);
+  colour += uBulgeColor * bulgeTex * 0.09 * smoothstep(0.26, 0.02, r);
 
-  vec3 inner = uCoreColor;
-  vec3 outer = uArmColor;
-  vec3 tint = mix(inner, outer, smoothstep(0.03, 0.62, r));
+  // --- the disc's unresolved light -----------------------------------------
+  // A galaxy is a disc, not four strokes: this is what keeps the sky between the arms
+  // faintly luminous instead of black.
+  vec3 discTint = mix(uBulgeColor, uArmColor, smoothstep(0.06, 0.32, r));
+  float discGlow = exp(-r * 3.6) * 0.050 + exp(-r * 2.1) * 0.012;
+  colour += discTint * discGlow * (0.50 + 0.80 * cloud) * (0.55 + 0.80 * glowGate);
 
-  // Fine clumping is what separates a nebula from an airbrushed gradient.
-  float cloud = fbm3(fp * vec3(5.0, 6.2, 1.7) + 9.0, 4);
-  float midClump = fbm3(fp * vec3(16.0, 20.0, 3.0) + 6.0, 3);
-  float clump = fbm3(fp * vec3(34.0, 41.0, 5.0) + 4.0, 3);
-  float grain = fbm3(fp * vec3(78.0, 92.0, 9.0) + 2.0, 2);
-  float armsAmt = smoothstep(0.02, 0.52, arms) * (0.55 + 0.95 * cloud) * (0.82 + 0.32 * clump);
-  vec3 color = inner * coreGlow;
-  color += tint * (armsAmt * 0.34 + armGlow * 0.17);
-  color += uHazeColor * armGlow * clump * 0.10;
-  // Unresolved disc light between the arms: a galaxy is a disc, not four painted
-  // strokes. This is what keeps the inter-arm sky faintly luminous instead of black.
-  color += uArmColor * (0.05 + 0.045 * armGlow) * exp(-r * 1.8) * (0.55 + 0.7 * cloud);
-  // Star-forming regions: rare pink knots where a slow clump, a fine clump and an arm
-  // all agree. Sparse on purpose — a galaxy speckled evenly with pink reads as confetti.
-  float hii = smoothstep(0.70, 0.90, midClump) * smoothstep(0.72, 0.94, grain) * smoothstep(0.25, 0.5, armGlow);
-  color += vec3(1.0, 0.40, 0.52) * hii * 0.30;
-  color += uCoreColor * exp(-r * r * 2600.0) * 3.4;
-  color += uArmColor * armGlow * 0.014;
+  // --- arms: a broad band with a soft edge, brightest where it is young -----
+  vec3 armTint = mix(mix(uBulgeColor, uArmColor, smoothstep(0.05, 0.20, r)), uArmEdgeColor, smoothstep(0.45, 0.95, r));
+  float armEnv = smoothstep(0.10, 0.92, armGate);
+  // The arm's own brightness is segmented at a hundred pixels and at fifty: chains of
+  // bright complexes with quieter links between them. This is the scale a galaxy's
+  // arm structure actually lives at — finer than this and the arm turns to fuzz.
+  float seg = smoothstep(0.34, 0.66, cloud);
+  float seg2 = smoothstep(0.36, 0.68, mid);
+  float armTexture = (0.28 + 1.25 * seg) * (0.60 + 0.60 * seg2) * (0.86 + 0.20 * haze);
+  colour += armTint * armEnv * armTexture * 1.45 * calm;
+  colour += uArmColor * glowGate * 0.10 * (0.35 + 1.05 * cloud) * calm;
 
-  // Extinction. Dust is drawn by removing light: a lane is not a brown fog on top of a
-  // galaxy, it is the galaxy's own light not reaching the camera.
-  color *= 1.0 - clamp(dust, 0.0, 1.0) * 0.78;
-  color += uDustColor * dust * 0.12;
+  // --- H-II regions: sparse pink pigment where two clump scales agree ------
+  float hii = smoothstep(0.60, 0.86, mid) * smoothstep(0.62, 0.88, haze);
+  hii *= smoothstep(0.06, 0.30, glowGate) * smoothstep(0.16, 0.30, r);
+  colour += uKnotColor * hii * 0.45;
+
+  // --- extinction ----------------------------------------------------------
+  // A dust lane is not a brown fog laid over a galaxy; it is the galaxy's own light not
+  // arriving. So dust multiplies the emission down, and adds back almost nothing.
+  // The filaments are smooth and multi-scale: a hard threshold on fine noise paints
+  // blocks, and blocks were what the first attempt at this looked like.
+  float filament = fbm3(fp * vec3(7.5, 9.5, 2.2) + 23.0, 3) * 0.62
+                 + fbm3(fp * vec3(21.0, 26.0, 3.6) + 11.0, 2) * 0.38;
+  float dust = dustGate * (0.10 + 1.75 * filament * filament);
+  dust *= 1.0 - smoothstep(0.80, 1.05, r);
+  dust = clamp(dust, 0.0, 0.94);
+  colour *= 1.0 - 0.97 * dust;
+  colour += uDustColor * dust * 0.05;
 
   // A gentle outer taper, so the disc does not end on a hard circle.
-  color *= 1.0 - smoothstep(0.82, 1.14, r);
+  colour *= 1.0 - smoothstep(0.80, 1.14, r);
 
-  gl_FragColor = vec4(color, 1.0);
+  gl_FragColor = vec4(colour + halo, 1.0);
 }
 `;
 
+/**
+ * Star sprites. `aSize` is in CSS pixels on purpose (see the file header); `aHalo` is
+ * how much of the sprite is glow, so a bright star gets a soft halo and a faint one is
+ * a single clean point.
+ */
 const STAR_VERT = /* glsl */ `
 attribute vec3 aColor;
 attribute float aSize;
-attribute float aBrightness;
-uniform float uPixelScale;
+attribute float aBright;
+attribute float aHalo;
+uniform float uDpr;
 varying vec3 vColor;
-varying float vBrightness;
+varying float vBright;
+varying float vHalo;
 void main() {
   vColor = aColor;
-  vBrightness = aBrightness;
+  vBright = aBright;
+  vHalo = aHalo;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  float distance = max(-mvPosition.z, 0.001);
-  float size = aSize * uPixelScale / distance;
-  gl_PointSize = clamp(size, 1.5, 100.0);
+  gl_PointSize = max(aSize, 1.0) * uDpr;
 }
 `;
 
 const STAR_FRAG = /* glsl */ `
 uniform float uGain;
 varying vec3 vColor;
-varying float vBrightness;
+varying float vBright;
+varying float vHalo;
 void main() {
   vec2 c = gl_PointCoord - 0.5;
   float d = length(c) * 2.0;
   if (d > 1.0) discard;
+  // A tight core and a gaussian skirt: two exponentials is all a point source is.
   float core = exp(-d * d * 26.0);
-  float halo = exp(-d * 5.0) * 0.13 * (1.0 - core);
-  float spike = smoothstep(0.6, 0.95, vBrightness) * 0.12;
-  spike *= exp(-abs(c.x) * 70.0) * smoothstep(0.5, 0.05, abs(c.y));
-  spike += exp(-abs(c.y) * 70.0) * smoothstep(0.5, 0.05, abs(c.x)) * smoothstep(0.6, 0.95, vBrightness) * 0.12;
-  vec3 color = vColor * (core * 2.2 + halo * 1.0 + spike) + vec3(0.06) * core * core;
-  gl_FragColor = vec4(color * uGain * vBrightness, 1.0);
+  float skirt = exp(-d * 4.2) * (1.0 - core);
+  float profile = core + skirt * (0.06 + 0.6 * vHalo);
+  // Soft edge, so a two-pixel sprite is round instead of square.
+  profile *= smoothstep(1.0, 0.80, d);
+  gl_FragColor = vec4(vColor * profile * vBright * uGain, 1.0);
 }
 `;
 
@@ -198,11 +257,11 @@ interface ArmStyle {
 }
 
 function armStyle(armSpread: number): ArmStyle {
-  const sharpWidth = 0.030 + armSpread * 0.020;
+  const sharpWidth = 0.034 + armSpread * 0.022;
   return {
     sharpWidth,
-    glowWidth: sharpWidth * 2.4,
-    dustWidth: 0.010 + armSpread * 0.008,
+    glowWidth: sharpWidth * 2.0,
+    dustWidth: 0.014 + armSpread * 0.010,
     dustOffset: sharpWidth * 0.85,
   };
 }
@@ -210,6 +269,16 @@ function armStyle(armSpread: number): ArmStyle {
 /** Fold an angle difference into [-sector/2, sector/2]. */
 function foldToSector(value: number, sector: number): number {
   return value - Math.round(value / sector) * sector;
+}
+
+/** The 99.5th percentile of a buffer, sampled (cheap, robust against one bright splat). */
+function topValue(buffer: Float32Array, fraction: number): number {
+  const step = Math.max(1, Math.floor(buffer.length / 40_000));
+  const sample: number[] = [];
+  for (let i = 0; i < buffer.length; i += step) sample.push(buffer[i]!);
+  sample.sort((a, b) => a - b);
+  const index = Math.min(sample.length - 1, Math.floor(sample.length * fraction));
+  return Math.max(sample[index] ?? 0, 1e-5);
 }
 
 /**
@@ -223,15 +292,17 @@ function foldToSector(value: number, sector: number): number {
  * stars we were given* — no star positions are invented — but the light between them
  * is filled in like a long exposure.
  *
- * Channels: R = sharp arms · G = soft arm glow · B = bulge · A = dust lanes.
+ * Channels: R = arm gate · G = arm glow gate · B = bulge · A = dust gate. These are the
+ * gates only — broad, smooth cross-sections. `DISC_FRAG` supplies the clumping and the
+ * dust filaments from its own noise fields, so the arm's contrast is tunable in one
+ * place instead of being baked into an 8-bit texture.
  *
- * The dust lane is painted as a narrow band on the inner edge of each arm, which is
- * where extinction actually sits. It is a lookup table for the shader's extinction
- * term, not a second copy of the arm geometry.
+ * Two things in here exist purely to keep the core honest: the arm envelope starts well
+ * outside the nucleus, so nothing arm-shaped ever reaches the cusp; and there is no
+ * circumnuclear ring at all. An earlier version painted a noisy one there, and that ring
+ * is exactly what scalloped the nucleus in the frame the owner rejected.
  */
 function buildDensityTexture(
-  systems: readonly SystemStub[],
-  galaxyRadius: number,
   arms: number,
   coreDensity: number,
   style: ArmStyle,
@@ -289,6 +360,13 @@ function buildDensityTexture(
     return sum / Math.max(norm, 1e-5);
   };
 
+  const clamp = (value: number, min: number, max: number): number =>
+    Math.min(Math.max(value, min), max);
+
+  // The fbm fields above have a narrow natural range; structure needs the full 0..1.
+  const stretch = (value: number, lo: number, hi: number): number =>
+    Math.min(Math.max((value - lo) / (hi - lo), 0), 1);
+
   const smooth = (edge0: number, edge1: number, x: number): number => {
     const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
     return t * t * (3 - 2 * t);
@@ -299,7 +377,7 @@ function buildDensityTexture(
     for (let x = 0; x < size; x += 1) {
       const dx = (x / (size - 1) - 0.5) * 2;
       const r = Math.hypot(dx, dy);
-      if (r > 1.18) continue;
+      if (r > 1.16) continue;
       const theta = Math.atan2(dy, dx);
       // Shortest angular distance to the nearest arm centreline, then to physical
       // distance across the arm by multiplying by the radius.
@@ -307,84 +385,50 @@ function buildDensityTexture(
       const wrapped = foldToSector(folded, sector);
       const signed = wrapped * Math.max(r, 0.04);
       const across = Math.abs(signed);
-      const envelope = smooth(0.02, 0.18, r) * (1 - smooth(0.68, 0.98, r));
-      const widthMod = 0.68 + 0.62 * valueNoise(theta * 3.1 + 11, r * 9.3 + 5);
-      const arm = Math.exp(-Math.pow(across / (sharpWidth * widthMod), 2)) * envelope;
-      const soft = Math.exp(-Math.pow(across / (glowWidth * widthMod), 2)) * envelope;
+      // Arms start OUTSIDE the nucleus and die at the rim. Nothing arm-shaped reaches
+      // the cusp: that is the whole difference between a nucleus and a torn hole.
+      const envelope = smooth(0.11, 0.30, r) * (1 - smooth(0.70, 0.98, r));
+      // The arm's width breathes along its length; a constant width is what made an
+      // earlier version read as a painted ribbon.
+      const widthMod = 0.62 + 0.78 * valueNoise(theta * 2.6 + 11, r * 7.3 + 5);
+      // A real arm is asymmetric: a sharp inner edge where the density wave piles up,
+      // feathering outward. A symmetric gaussian is what reads as a painted tube.
+      const asym = clamp(0.55 - signed / (sharpWidth * 2.4), 0.06, 1.45);
+      // Large-scale segmenting: arms are chains of bright segments with dimmer links.
+      const segment = fbm2(x * 0.010 + 31, y * 0.010 + 7, 3);
+      const brk = fbm2(x * 0.026 + 17, y * 0.026 + 41, 2);
+      const mod = 0.05 + 1.55 * Math.pow(stretch(segment, 0.34, 0.66), 1.5) * (0.30 + 0.95 * stretch(brk, 0.34, 0.66));
+      const arm = Math.exp(-Math.pow(across / (sharpWidth * widthMod), 2)) * envelope * asym * mod;
+      const soft = Math.exp(-Math.pow(across / (glowWidth * widthMod), 2)) * envelope * (0.4 + 0.8 * segment);
 
-      // Three scales of cloud structure: the broad patches that make an arm bright in
-      // places, the mid-scale breaks, and the fine grain. This is the difference between
-      // a painted ribbon and something that looks like gas.
-      const cloud = fbm2(x * 0.028 + 11, y * 0.028 + 5, 3);
-      const mid = fbm2(x * 0.085 + 3, y * 0.085 + 23, 2);
-      const grain = fbm2(x * 0.20 + 7, y * 0.20 + 13, 2);
-      const patch = 0.28 + 1.30 * cloud * cloud * (0.45 + 0.8 * mid) * (0.82 + 0.38 * grain);
-
+      // The dust lane sits on the inner edge of the arm, where extinction actually is,
+      // and is broader than the ridge it cuts.
       const lane = Math.exp(-Math.pow((signed - dustOffset) / dustWidth, 2));
-      const laneWide = Math.exp(-Math.pow((signed - dustOffset * 1.75) / (dustWidth * 1.6), 2)) * 0.6;
-      const laneMask = lane + laneWide;
-      const dustClump = laneMask * (0.22 + 1.5 * cloud) * (0.35 + 1.0 * mid) * (0.55 + 0.7 * grain);
-      const dustPatch = arm * smooth(0.55, 0.85, grain) * 0.5;
+      const laneWide = Math.exp(-Math.pow((signed - dustOffset * 1.6) / (dustWidth * 2.0), 2)) * 0.5;
+      // Spurs of dust between the arms: the thing that stops the disc reading as four
+      // painted strokes on a clean background. Low frequency on purpose — fine noise
+      // here paints black confetti.
+      const spur = smooth(0.52, 0.80, segment) * smooth(0.30, 0.66, brk) * 0.85 * smooth(0.12, 0.32, r);
 
-      sharp[y * size + x]! += arm * patch * confidence;
-      glow[y * size + x]! += (soft * (0.35 + 0.9 * cloud) + arm * 0.16) * confidence;
-      bulge[y * size + x]! += Math.exp(-r * r * 70) * (0.7 + coreDensity * 0.8);
-      dust[y * size + x]! += (dustClump * envelope + dustPatch) * confidence;
-
-      // A circumnuclear dust ring: the dark loop that makes a bright core read as a
-      // galaxy core rather than a lamp.
-      const ringR = 0.135 + 0.012 * Math.sin(theta * 5 + 1.7);
-      const ring = Math.exp(-Math.pow((r - ringR) / 0.026, 2)) * (0.55 + 0.45 * valueNoise(theta * 4 + 2, r * 20));
-      dust[y * size + x]! += ring * 0.9;
+      sharp[y * size + x]! += arm * confidence;
+      glow[y * size + x]! += soft * confidence;
+      bulge[y * size + x]! += Math.exp(-Math.pow(r / 0.14, 1.10)) * (0.75 + coreDensity * 0.7);
+      dust[y * size + x]! += ((lane + laneWide) * envelope * 0.85 + spur * (1 - envelope * 0.5)) * confidence;
     }
   }
 
-  // Resolved stars: small bright knots inside the arms, and the broad haze of the
-  // sample. These come from the actual positions, so the star sprites and the glow
-  // can never drift apart.
-  const splat = (buffer: Float32Array, u: number, v: number, sigma: number, weight: number): void => {
-    const px = u * (size - 1);
-    const py = v * (size - 1);
-    const reach = Math.ceil(sigma * 3);
-    const x0 = Math.max(0, Math.floor(px) - reach);
-    const x1 = Math.min(size - 1, Math.floor(px) + reach);
-    const y0 = Math.max(0, Math.floor(py) - reach);
-    const y1 = Math.min(size - 1, Math.floor(py) + reach);
-    const denom = 2 * sigma * sigma;
-    for (let y = y0; y <= y1; y += 1) {
-      for (let x = x0; x <= x1; x += 1) {
-        const ddx = x - px;
-        const ddy = y - py;
-        const falloff = Math.exp(-(ddx * ddx + ddy * ddy) / denom);
-        if (falloff > 0.0006) buffer[y * size + x]! += falloff * weight;
-      }
-    }
-  };
-
-  for (const system of systems) {
-    const u = system.position.x / galaxyRadius * 0.5 + 0.5;
-    const v = system.position.z / galaxyRadius * 0.5 + 0.5;
-    if (u < 0 || u > 1 || v < 0 || v > 1) continue;
-    const weight = 0.4 + system.brightness * 1.2;
-    splat(sharp, u, v, 1.3, weight * 0.55);
-  }
-
-  const maxOf = (buffer: Float32Array): number => {
-    let max = 0;
-    for (let i = 0; i < buffer.length; i += 1) max = Math.max(max, buffer[i]!);
-    return Math.max(max, 1e-5);
-  };
-  const maxSharp = maxOf(sharp);
-  const maxGlow = maxOf(glow);
-  const maxBulge = maxOf(bulge);
-  const maxDust = maxOf(dust);
   const data = new Uint8Array(size * size * 4);
+  const maxSharp = topValue(sharp, 0.999);
+  const maxGlow = topValue(glow, 0.999);
+  const maxBulge = topValue(bulge, 0.9995);
+  const maxDust = topValue(dust, 0.998);
+  const grade = (value: number, max: number): number =>
+    Math.round(Math.min(1, Math.pow(value / max, 0.62)) * 255);
   for (let i = 0; i < size * size; i += 1) {
-    // sqrt grades the sparse peaks into an arm; linear values make 24 stars look like dots.
-    data[i * 4] = Math.round(Math.min(1, Math.sqrt(sharp[i]! / maxSharp)) * 255);
-    data[i * 4 + 1] = Math.round(Math.min(1, Math.sqrt(glow[i]! / maxGlow)) * 255);
+    data[i * 4] = grade(sharp[i]!, maxSharp);
+    data[i * 4 + 1] = grade(glow[i]!, maxGlow);
     data[i * 4 + 2] = Math.round(Math.min(1, Math.sqrt(bulge[i]! / maxBulge)) * 255);
-    data[i * 4 + 3] = Math.round(Math.min(1, Math.sqrt(dust[i]! / maxDust)) * 255);
+    data[i * 4 + 3] = grade(dust[i]!, maxDust);
   }
 
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -419,27 +463,31 @@ export class GalaxyView {
     this.radius = galaxy.params.galaxyRadius;
     this.scene.background = new THREE.Color(0x000000);
 
+    // Background sky: seeded, static, and faint. It is decoration, so it is seeded from
+    // the galaxy seed and never touches the generated systems.
     this.sky = createStarfield({
-      count: 4200 + Math.min(galaxy.systems.length * 6, 2600),
+      count: 3600 + Math.min(galaxy.systems.length * 5, 2200),
       radius: this.radius * 9,
       seed: hashString(galaxy.params.seed) ^ 0x51ed27,
-      band: 0.42,
-      intensity: 0.7,
-      sizeRange: [0.6, 2.2],
+      band: 0.34,
+      intensity: 0.34,
+      sizeRange: [0.6, 1.9],
+      tint: GALAXY.sky,
     });
     this.scene.add(this.sky.points);
 
     this.style = armStyle(galaxy.params.armSpread);
     this.spiral = fitArms(galaxy.systems, this.radius, galaxy.params.arms, galaxy.params.armTwist);
     this.density = buildDensityTexture(
-      galaxy.systems,
-      this.radius,
       galaxy.params.arms,
       galaxy.params.coreDensity,
       this.style,
       this.spiral,
     );
-    this.discGeometry = new THREE.CircleGeometry(this.radius * 1.32, 200);
+    // The plane is much larger than the disc: the far field is the galaxy's faint halo,
+    // painted in the same draw call (the galaxy budget has no room for a background
+    // pass, and it does not need one).
+    this.discGeometry = new THREE.CircleGeometry(this.radius * 2.4, 160);
     this.discMaterial = new THREE.ShaderMaterial({
       vertexShader: DISC_VERT,
       fragmentShader: DISC_FRAG,
@@ -447,10 +495,13 @@ export class GalaxyView {
         uDensity: { value: this.density },
         uRadius: { value: this.radius },
         uCoreDensity: { value: galaxy.params.coreDensity },
-        uCoreColor: { value: new THREE.Color(1.0, 0.78, 0.48) },
-        uArmColor: { value: new THREE.Color(0.55, 0.68, 1.0) },
-        uHazeColor: { value: new THREE.Color(0.42, 0.30, 0.72) },
-        uDustColor: { value: new THREE.Color(0.26, 0.15, 0.09) },
+        uNucleusColor: { value: linear(GALAXY.nucleus) },
+        uBulgeColor: { value: linear(GALAXY.bulge) },
+        uArmColor: { value: linear(GALAXY.arm) },
+        uArmEdgeColor: { value: linear(GALAXY.armEdge) },
+        uKnotColor: { value: linear(GALAXY.hii) },
+        uDustColor: { value: linear(GALAXY.dust) },
+        uHaloColor: { value: linear(GALAXY.halo) },
       },
       blending: THREE.AdditiveBlending,
       depthTest: false,
@@ -465,94 +516,13 @@ export class GalaxyView {
     this.disc.frustumCulled = false;
     this.scene.add(this.disc);
 
-    // Real systems are pickable; the seeded sparkle points are unresolved starlight and
-    // star-forming knots painted along the arms the sample itself describes. They share
-    // the stars' draw call, because the galaxy view's budget of 8 is for everything.
-    const sparkleCount = 4800;
-    const total = galaxy.systems.length + sparkleCount;
-    const positions = new Float32Array(total * 3);
-    const colors = new Float32Array(total * 3);
-    const sizes = new Float32Array(total);
-    const brightness = new Float32Array(total);
-    const rng = mulberry32(hashString(`${galaxy.params.seed}:stars`));
-    const confidence = Math.min(Math.max((this.spiral.concentration - 0.12) / 0.5, 0), 1);
-    const sector = (Math.PI * 2) / Math.max(galaxy.params.arms, 1);
-
-    galaxy.systems.forEach((stub, i) => {
-      this.stars.push({ stub, position: new THREE.Vector3(stub.position.x, stub.position.y, stub.position.z) });
-      positions[i * 3] = stub.position.x;
-      positions[i * 3 + 1] = stub.position.y;
-      positions[i * 3 + 2] = stub.position.z;
-      colors[i * 3] = stub.color[0];
-      colors[i * 3 + 1] = stub.color[1];
-      colors[i * 3 + 2] = stub.color[2];
-      // The size carries brightness, but a little seeded variation keeps a row of equal
-      // spectral classes from looking stamped.
-      const jitter = 0.7 + Math.pow(rng(), 2.2) * 1.7;
-      sizes[i] = this.radius * (0.0010 + 0.0031 * Math.pow(stub.brightness, 1.4)) * jitter;
-      brightness[i] = 0.9 + stub.brightness * 2.4;
-    });
-
-    const galaxyRng = mulberry32(hashString(`${galaxy.params.seed}:sparkle`));
-    const gauss = (): number => (galaxyRng() + galaxyRng() + galaxyRng() - 1.5) / 1.5;
-    let sparkle = 0;
-    let guard = 0;
-    while (sparkle < sparkleCount && guard < sparkleCount * 3) {
-      guard += 1;
-      const r = 0.07 + 0.92 * Math.pow(galaxyRng(), 0.72);
-      const arm = Math.floor(galaxyRng() * galaxy.params.arms);
-      const spreadArc = (0.012 + galaxy.params.armSpread * 0.02) * gauss();
-      const arc = Math.abs(spreadArc);
-      const dustAvoid =
-        confidence > 0.2 &&
-        arc > this.style.dustOffset - this.style.dustWidth &&
-        arc < this.style.dustOffset + this.style.dustWidth;
-      if (dustAvoid && galaxyRng() < 0.72) {
-        // A gap in the sparkle inside the dust lane is what makes the lane read as a
-        // lane rather than a painted stripe.
-        continue;
-      }
-      const i = galaxy.systems.length + sparkle;
-      sparkle += 1;
-      const theta =
-        this.spiral.phase + arm * sector + this.spiral.k * Math.log(Math.max(r, 0.02)) + spreadArc / Math.max(r, 0.06);
-      const radius = this.radius * (r + (galaxyRng() - 0.5) * 0.012);
-      positions[i * 3] = Math.cos(theta) * radius;
-      positions[i * 3 + 1] = (galaxyRng() - 0.5) * this.radius * 0.006 * (1 - r * 0.7);
-      positions[i * 3 + 2] = Math.sin(theta) * radius;
-
-      const knot = galaxyRng() < 0.055;
-      if (knot) {
-        // Pink H-II knots: a few bright star-forming clumps along the arms.
-        colors[i * 3] = 1.0;
-        colors[i * 3 + 1] = 0.38 + galaxyRng() * 0.18;
-        colors[i * 3 + 2] = 0.55 + galaxyRng() * 0.2;
-        sizes[i] = this.radius * (0.0008 + galaxyRng() * 0.0012);
-        brightness[i] = 0.22 + galaxyRng() * 0.22;
-      } else {
-        const warm = galaxyRng();
-        colors[i * 3] = 0.72 + warm * 0.28;
-        colors[i * 3 + 1] = 0.76 + warm * 0.2;
-        colors[i * 3 + 2] = 0.92 + galaxyRng() * 0.08;
-        sizes[i] = this.radius * (0.0004 + galaxyRng() * 0.0011);
-        brightness[i] = 0.03 + Math.pow(galaxyRng(), 2.6) * 0.22;
-      }
-      // Fade the sparkle population where the arm fit is weak.
-      brightness[i] = brightness[i]! * (0.3 + 0.7 * Math.max(confidence, 0.3));
-    }
-
-    this.starGeometry = new THREE.BufferGeometry();
-    this.starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.starGeometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
-    this.starGeometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-    this.starGeometry.setAttribute('aBrightness', new THREE.BufferAttribute(brightness, 1));
-    this.starGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), this.radius * 2);
+    this.starGeometry = this.buildSprites();
     this.starMaterial = new THREE.ShaderMaterial({
       vertexShader: STAR_VERT,
       fragmentShader: STAR_FRAG,
       uniforms: {
-        uPixelScale: { value: 900 },
-        uGain: { value: 1.25 },
+        uDpr: { value: 1 },
+        uGain: { value: 1.0 },
       },
       blending: THREE.AdditiveBlending,
       depthTest: false,
@@ -566,21 +536,164 @@ export class GalaxyView {
     this.scene.add(this.starPoints);
   }
 
+  /**
+   * One Points object holds three populations, because the galaxy's budget is three
+   * scene draws and this is the third:
+   *  - every real system, in its own generated colour, one to three pixels wide;
+   *  - a seeded field of unresolved stars that gives the arms their granularity;
+   *  - sparse pink H-II knots in the arms.
+   */
+  private buildSprites(): THREE.BufferGeometry {
+    const galaxy = this.galaxy;
+    const systems = galaxy.systems;
+    const confidence = Math.min(Math.max((this.spiral.concentration - 0.12) / 0.5, 0), 1);
+    const sector = (Math.PI * 2) / Math.max(galaxy.params.arms, 1);
+    // The field is what gives the arms their grain. A galaxy photograph is a smooth glow
+    // plus resolved points, and points are the only thing that reads as stars: shader
+    // noise at this scale paints soft blobs instead. 40k points for a 180-system galaxy
+    // is a quarter of a percent of the 400k budget.
+    const fieldCount = Math.round(Math.min(Math.max(systems.length * 210, 18_000), 70_000));
+    const knotCount = Math.round(Math.min(Math.max(systems.length * 2.4, 240), 1200));
+    const total = systems.length + fieldCount + knotCount;
+
+    const positions = new Float32Array(total * 3);
+    const colors = new Float32Array(total * 3);
+    const sizes = new Float32Array(total);
+    const bright = new Float32Array(total);
+    const halo = new Float32Array(total);
+
+    // Which real systems get a visible halo: the brightest 2%, as a photograph would
+    // show them. The rest are clean points.
+    const ranked = systems
+      .map((stub, index) => ({ brightness: stub.brightness, index }))
+      .sort((a, b) => b.brightness - a.brightness);
+    const haloCut = Math.max(1, Math.round(systems.length * 0.02));
+    const haloRank = new Map<number, number>();
+    ranked.forEach((entry, rank) => haloRank.set(entry.index, rank));
+
+    const jitter = mulberry32(hashString(`${galaxy.params.seed}:sprites`));
+    systems.forEach((stub, i) => {
+      this.stars.push({ stub, position: new THREE.Vector3(stub.position.x, stub.position.y, stub.position.z) });
+      positions[i * 3] = stub.position.x;
+      positions[i * 3 + 1] = stub.position.y;
+      positions[i * 3 + 2] = stub.position.z;
+      const colour = chroma(stub.color);
+      colors[i * 3] = colour[0];
+      colors[i * 3 + 1] = colour[1];
+      colors[i * 3 + 2] = colour[2];
+      const rank = haloRank.get(i) ?? systems.length;
+      const isHalo = rank < haloCut;
+      // A point source: 1.2–2.6 px, and the brightest few percent a little wider with a
+      // skirt. Nothing here may ever reach the size where a star reads as a disc.
+      sizes[i] = isHalo ? 2.8 + jitter() * 1.6 : 1.2 + jitter() * 1.1;
+      halo[i] = isHalo ? 1 : 0.10 + jitter() * 0.18;
+      bright[i] = (isHalo ? 1.0 : 0.45) + stub.brightness * 0.95;
+    });
+
+    // The field: unresolved stars, sampled on the fitted arms. They are dimmer than any
+    // real system, so a `SystemStub` is always the brighter thing at its own position.
+    const rng = mulberry32(hashString(`${galaxy.params.seed}:field`));
+    const gauss = (): number => (rng() + rng() + rng() - 1.5) / 1.5;
+    let field = 0;
+    let guard = 0;
+    while (field < fieldCount && guard < fieldCount * 3) {
+      guard += 1;
+      // Radial profile: the disc's surface brightness falls off outward.
+      const r = 0.055 + 0.965 * Math.pow(rng(), 0.62);
+      const arm = Math.floor(rng() * galaxy.params.arms);
+      const spreadArc = (0.010 + galaxy.params.armSpread * 0.020) * gauss();
+      const arc = Math.abs(spreadArc);
+      // Leave the dust lane empty, or the lane reads as a painted stripe rather than a
+      // gap in the light.
+      if (
+        confidence > 0.2 &&
+        arc > this.style.dustOffset - this.style.dustWidth &&
+        arc < this.style.dustOffset + this.style.dustWidth &&
+        rng() < 0.82
+      ) {
+        continue;
+      }
+      // A quarter of the field is inter-arm disc: a galaxy is a disc, not four ribbons.
+      const interarm = rng() < 0.18;
+      const i = systems.length + field;
+      field += 1;
+      const theta = interarm
+        ? rng() * Math.PI * 2
+        : this.spiral.phase + arm * sector + this.spiral.k * Math.log(Math.max(r, 0.02)) + spreadArc / Math.max(r, 0.07);
+      const radius = this.radius * (r + (rng() - 0.5) * 0.012);
+      positions[i * 3] = Math.cos(theta) * radius;
+      positions[i * 3 + 1] = (rng() - 0.5) * this.radius * 0.009 * (1 - r * 0.6);
+      positions[i * 3 + 2] = Math.sin(theta) * radius;
+
+      if (interarm) {
+        // Old, dim, warm: the disc's background population.
+        const warm = chroma(rng() < 0.5 ? GALAXY.bulge : GALAXY.disc);
+        colors[i * 3] = warm[0];
+        colors[i * 3 + 1] = warm[1];
+        colors[i * 3 + 2] = warm[2];
+      } else {
+        // Young and blue-white, cooler toward the rim.
+        const young = chroma(rng() < 0.30 ? GALAXY.arm : GALAXY.armEdge);
+        colors[i * 3] = young[0];
+        colors[i * 3 + 1] = young[1];
+        colors[i * 3 + 2] = young[2];
+      }
+      sizes[i] = 0.95 + rng() * 0.85;
+      halo[i] = 0.04 + rng() * 0.10;
+      // A few percent of the field is genuinely bright: the young supergiants that make
+      // a galaxy's arms glitter instead of glowing evenly.
+      const flare = rng() < 0.03;
+      bright[i] = (0.14 + Math.pow(rng(), 2.4) * 0.42) * (0.55 + 0.45 * Math.max(confidence, 0.6));
+      if (flare) {
+        bright[i] = bright[i]! * 2.4;
+        sizes[i] = 1.6 + rng() * 1.0;
+        halo[i] = 0.55;
+      }
+      if (interarm) bright[i] = bright[i]! * 0.55;
+    }
+
+    // H-II knots: pink star-forming clusters. Sparse on purpose — a galaxy speckled
+    // evenly with pink reads as confetti.
+    for (let k = 0; k < knotCount; k += 1) {
+      const i = systems.length + fieldCount + k;
+      const r = 0.14 + rng() * 0.78;
+      const arm = Math.floor(rng() * galaxy.params.arms);
+      const side = rng() < 0.5 ? -1 : 1;
+      const spreadArc = side * (0.002 + rng() * 0.014);
+      const theta = this.spiral.phase + arm * sector + this.spiral.k * Math.log(Math.max(r, 0.02)) + spreadArc / Math.max(r, 0.07);
+      const radius = this.radius * (r + (rng() - 0.5) * 0.008);
+      positions[i * 3] = Math.cos(theta) * radius;
+      positions[i * 3 + 1] = (rng() - 0.5) * this.radius * 0.007;
+      positions[i * 3 + 2] = Math.sin(theta) * radius;
+      const pink = chroma(GALAXY.hii);
+      const warm = 0.88 + rng() * 0.12;
+      colors[i * 3] = pink[0] * warm;
+      colors[i * 3 + 1] = pink[1] * warm;
+      colors[i * 3 + 2] = pink[2] * warm;
+      sizes[i] = 2.0 + rng() * 3.0;
+      halo[i] = 1.0;
+      bright[i] = (0.55 + rng() * 1.05) * (0.5 + 0.5 * Math.max(confidence, 0.5));
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    geometry.setAttribute('aBright', new THREE.BufferAttribute(bright, 1));
+    geometry.setAttribute('aHalo', new THREE.BufferAttribute(halo, 1));
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), this.radius * 2);
+    return geometry;
+  }
+
   /** Position of a stub in galaxy units, or null when it is not part of this galaxy. */
   systemPosition(id: string): THREE.Vector3 | null {
     const found = this.stars.find((s) => s.stub.id === id);
     return found ? found.position : null;
   }
 
-
   setDpr(dpr: number): void {
     this.sky.setDpr(dpr);
-  }
-
-  /** Recompute the perspective sprite scale after a resize or camera FOV change. */
-  setViewport(heightPx: number, fovYDeg: number): void {
-    const fov = (fovYDeg * Math.PI) / 180;
-    this.starMaterial.uniforms.uPixelScale!.value = heightPx / (2 * Math.tan(fov / 2));
+    this.starMaterial.uniforms.uDpr!.value = dpr;
   }
 
   dispose(): void {

@@ -79,18 +79,32 @@ float pointProfile(float d, float sharpness) {
  * Radial ring banding, shared by the ring mesh and by the ring's shadow on the
  * planet's surface, so the shadow bands line up with the rings that cast them.
  * `t` is 0 at the inner edge, 1 at the outer edge.
+ *
+ * The profile is a *density*, not a brightness: broad zones, a few divisions, and a
+ * fine ringlet structure. Every transition is a smoothstep wide enough to survive a
+ * pixel — hard thresholds on a radial function are what put abrupt black bars in the
+ * rings in the frame the owner rejected.
  */
 export const GLSL_RINGS = /* glsl */ `
-float ringPattern(float t) {
-  float fine = vnoise1(t * 34.0 + 4.0);
-  float grain = 0.5 + 0.5 * sin(t * 240.0 + fine * 5.0);
-  float mid = 0.55 + 0.45 * vnoise1(t * 12.0 + 1.3);
-  float broad = 0.65 + 0.35 * vnoise1(t * 3.6 + 7.0);
-  // Two divisions: one narrow, one wide (Cassini-analogue). Real rings have gaps.
-  float gapA = smoothstep(0.30, 0.315, t) * (1.0 - smoothstep(0.335, 0.355, t));
-  float gapB = smoothstep(0.60, 0.625, t) * (1.0 - smoothstep(0.665, 0.695, t));
-  float bands = (0.55 * mid + 0.25 * fine + 0.20 * grain) * broad;
-  return clamp(0.22 + 0.78 * bands, 0.0, 1.0) * (1.0 - 0.85 * gapA) * (1.0 - 0.9 * gapB);
+float ringDensity(float t) {
+  float zones = vnoise1(t * 2.7 + 4.0);
+  float bands = vnoise1(t * 8.5 + 11.0);
+  float fine = vnoise1(t * 26.0 + 2.0);
+  float dust = vnoise1(t * 62.0 + 7.0);
+  float density = 0.56 + 0.22 * (zones - 0.5) + 0.26 * (bands - 0.5) + 0.32 * (fine - 0.5) + 0.24 * (dust - 0.5);
+  // Rings are high-contrast: dense lanes next to nearly empty ones. Without this the
+  // radial profile averages out into a smooth brown wash.
+  density = smoothstep(0.16, 0.78, clamp(density, 0.0, 1.0));
+
+  // Divisions: one broad (a Cassini analogue) and one narrow, with soft shoulders.
+  float gapA = smoothstep(0.295, 0.325, t) * (1.0 - smoothstep(0.355, 0.395, t));
+  float gapB = smoothstep(0.640, 0.665, t) * (1.0 - smoothstep(0.690, 0.725, t));
+  density *= 1.0 - 0.98 * gapA;
+  density *= 1.0 - 0.99 * gapB;
+
+  // Ringlets: narrow bright lanes, the thing that makes a ring read as particles.
+  density *= 0.72 + 0.52 * smoothstep(0.28, 0.66, vnoise1(t * 52.0 + 21.0));
+  return clamp(density, 0.0, 1.0);
 }
 `;
 

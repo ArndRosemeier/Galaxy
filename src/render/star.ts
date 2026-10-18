@@ -127,14 +127,18 @@ export class StarVisual {
   readonly group = new THREE.Group();
   readonly surface: THREE.Mesh;
   readonly light: THREE.PointLight;
+  /** Drawn photosphere radius in world units (before `setScreenSize` scales it). */
+  readonly baseRadius: number;
   private readonly surfaceGeometry: THREE.SphereGeometry;
   private readonly surfaceMaterial: THREE.ShaderMaterial;
   private readonly coronaMaterials: THREE.ShaderMaterial[] = [];
   private readonly coronaMeshes: THREE.Mesh[] = [];
+  private readonly coronaBaseSizes: number[] = [];
   private readonly seed: number;
   private readonly compact: boolean;
 
   constructor(star: Star, radius: number, detail: 'system' | 'planet' = 'system') {
+    this.baseRadius = radius;
     this.seed = (star.temperatureK % 97) / 17;
     const color = new THREE.Color(star.color[0], star.color[1], star.color[2]);
     const dark = star.spectral === 'BH' ? 1 : 0;
@@ -165,12 +169,33 @@ export class StarVisual {
       mesh.renderOrder = 5;
       this.coronaMaterials.push(material);
       this.coronaMeshes.push(mesh);
+      this.coronaBaseSizes.push(size);
       this.group.add(mesh);
     }
 
     this.light = new THREE.PointLight(color, 2.6, 0, 0);
     this.light.decay = 0;
     this.group.add(this.light);
+  }
+
+  /**
+   * Give the star a floor in screen space.
+   *
+   * `worldPerPixel` is the world-units-per-CSS-pixel at the star's depth. The
+   * photosphere is scaled up until it is at least `minPhotospherePx` across, and each
+   * corona shell until it is at least `minCoronaPx`; nothing ever shrinks. This is what
+   * makes a true-to-scale star — a fraction of a pixel at a camera that fits a system —
+   * still read as the brightest object in the frame.
+   */
+  setScreenSize(worldPerPixel: number, minPhotospherePx: number, minCoronaPx: number): void {
+    if (!(worldPerPixel > 0)) return;
+    const scale = Math.max(1, (minPhotospherePx * worldPerPixel) / Math.max(this.baseRadius, 1e-9));
+    this.group.scale.setScalar(scale);
+    const coronaFloor = minCoronaPx * worldPerPixel;
+    for (let i = 0; i < this.coronaMaterials.length; i += 1) {
+      const base = this.coronaBaseSizes[i] ?? 0;
+      this.coronaMaterials[i]!.uniforms.uSize!.value = Math.max(base * scale, coronaFloor);
+    }
   }
 
   update(timeSeconds: number): void {

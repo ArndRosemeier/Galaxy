@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import { GLSL_TONEMAP } from './glsl';
+import { AFFORDANCE, linear } from './palette';
 
 const QUAD_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -120,6 +121,11 @@ void main() {
 export interface PostOptions {
   /** Bloom contribution, per view. */
   bloomStrength: number;
+  /**
+   * Luma above which a pixel blooms. Per view: the galaxy's point sources must halo a
+   * little, a world's mid-tones must not.
+   */
+  bloomThreshold?: number;
   exposure?: number;
   vignette?: number;
 }
@@ -222,7 +228,7 @@ export class PostChain {
         uExposure: { value: 1.0 },
         uFlash: { value: 0 },
         uVignette: { value: 0.34 },
-        uFlashColor: { value: new THREE.Color(1.0, 0.82, 0.58) },
+        uFlashColor: { value: linear(AFFORDANCE.flash) },
         uTime: { value: 0 },
       },
       depthTest: false,
@@ -279,6 +285,7 @@ export class PostChain {
     (blur.uDir!.value as THREE.Vector2).set(0, 1 / bh);
     this.drawQuad(this.blurMaterial, this.bloomA);
 
+    this.brightMaterial.uniforms.uThreshold!.value = options.bloomThreshold ?? 0.9;
     const composite = this.compositeMaterial.uniforms;
     composite.uBloomStrength!.value = options.bloomStrength;
     composite.uExposure!.value = options.exposure ?? 1.0;

@@ -36,12 +36,27 @@ import { pickNearestOnScreen, projectToScreen, screenRadiusPx, type ScreenTarget
 
 export type { PickTarget, RendererOptions, RenderInfo, ViewKind } from './api';
 
-/** Per-view post settings: the galaxy glows, a world must not wash out. */
-const VIEW_LOOK: Record<ViewKind, { bloom: number; exposure: number; vignette: number }> = {
-  galaxy: { bloom: 0.55, exposure: 0.97, vignette: 0.40 },
-  system: { bloom: 0.5, exposure: 1.0, vignette: 0.34 },
-  planet: { bloom: 0.42, exposure: 1.12, vignette: 0.30 },
+/**
+ * Per-view post settings.
+ *
+ * `bloom` is a halo, not a glow effect: it must be small enough that a point source
+ * stays a point. `threshold` decides what is allowed to bloom at all — in the galaxy
+ * only the nucleus and the brightest stars are, which is what keeps a field of stars
+ * from turning into a field of discs (the defect in the frame the owner rejected).
+ */
+const VIEW_LOOK: Record<ViewKind, { bloom: number; threshold: number; exposure: number; vignette: number }> = {
+  galaxy: { bloom: 0.30, threshold: 0.95, exposure: 1.0, vignette: 0.34 },
+  system: { bloom: 0.42, threshold: 0.85, exposure: 1.0, vignette: 0.32 },
+  planet: { bloom: 0.34, threshold: 0.95, exposure: 1.06, vignette: 0.28 },
 };
+
+/**
+ * Per-view lens. The system view gets a longer lens: at 50° the near rim of a tilted
+ * disc is so much closer than its far rim that fitting the far rim leaves the frame
+ * half empty (and fitting the near rim crops the orbits). A longer lens compresses that
+ * ratio, so the whole system fits *and* fills the frame.
+ */
+const VIEW_FOV: Record<ViewKind, number> = { galaxy: 50, system: 40, planet: 46 };
 
 
 interface Flight {
@@ -156,7 +171,6 @@ export class GalaxyRenderer {
     const old = this.galaxyView;
     this.galaxyView = new GalaxyView(galaxy);
     this.galaxyView.setDpr(this.dpr);
-    this.galaxyView.setViewport(this.height * this.dpr, this.rig.camera.fov);
     if (old) {
       old.scene.remove(this.markers.points);
       old.dispose();
@@ -190,7 +204,7 @@ export class GalaxyRenderer {
     this.poses.system = undefined;
     if (this.renderView === 'system') {
       this.refreshMarkersScene();
-      if (!this.flight) this.rig.setPose(this.systemView.defaultPose(this.aspect(), this.rig.camera.fov));
+      if (!this.flight) this.rig.setPose(this.systemView.defaultPose(this.aspect(), VIEW_FOV.system));
     }
   }
 
@@ -206,7 +220,7 @@ export class GalaxyRenderer {
     if (this.renderView === 'planet') {
       this.refreshMarkersScene();
       if (!this.flight) {
-        this.rig.setPose(this.planetView.defaultPose(this.aspect(), this.rig.camera.fov));
+        this.rig.setPose(this.planetView.defaultPose(this.aspect(), VIEW_FOV.planet));
       }
     }
   }
@@ -350,7 +364,6 @@ export class GalaxyRenderer {
     this.rig.setAspect(this.aspect());
     this.markers.setDpr(this.dpr);
     this.galaxyView?.setDpr(this.dpr);
-    this.galaxyView?.setViewport(this.height * this.dpr, this.rig.camera.fov);
     this.systemView?.setDpr(this.dpr);
     this.planetView?.setDpr(this.dpr);
 
@@ -467,9 +480,9 @@ export class GalaxyRenderer {
     const radius = galaxy.radius;
     const fovY = this.rig.camera.fov * (Math.PI / 180);
     const fovX = 2 * Math.atan(Math.tan(fovY / 2) * this.aspect());
-    const elevation = 0.62;
-    const horizontal = (radius * 1.24) / Math.tan(fovX / 2);
-    const vertical = (radius * Math.sin(elevation) * 1.38 + radius * 0.05) / Math.tan(fovY / 2);
+    const elevation = 0.64;
+    const horizontal = (radius * 1.18) / Math.tan(fovX / 2);
+    const vertical = (radius * Math.sin(elevation) * 1.30 + radius * 0.04) / Math.tan(fovY / 2);
     const distance = Math.max(horizontal, vertical);
     return {
       position: directionFromAngles(elevation, -0.62).multiplyScalar(distance),
@@ -498,19 +511,14 @@ export class GalaxyRenderer {
   }
 
   private poseFor(view: ViewKind): CameraPose {
+    const fov = VIEW_FOV[view];
     switch (view) {
       case 'galaxy':
         return this.poses.galaxy ?? this.galaxyOverviewPose();
       case 'system':
-        return (
-          this.poses.system ??
-          this.systemView!.defaultPose(this.aspect(), this.rig.camera.fov)
-        );
+        return this.poses.system ?? this.systemView!.defaultPose(this.aspect(), fov);
       case 'planet':
-        return (
-          this.poses.planet ??
-          this.planetView!.defaultPose(this.aspect(), this.rig.camera.fov)
-        );
+        return this.poses.planet ?? this.planetView!.defaultPose(this.aspect(), fov);
     }
   }
 
@@ -525,7 +533,7 @@ export class GalaxyRenderer {
     }
     if (view === 'system') {
       const system = this.systemView!;
-      const near = Math.max(system.starRadius * 0.02, 1e-5);
+      const near = Math.max(system.starRadius * 0.002, 1e-6);
       const far = system.outerAU * 120;
       const planet = this.focusPlanetId ? system.planetVisual(this.focusPlanetId) : null;
       if (planet) {
@@ -538,6 +546,7 @@ export class GalaxyRenderer {
 
   private activate(view: ViewKind, pose: CameraPose, enableControls = true): void {
     this.renderView = view;
+    this.rig.setFov(VIEW_FOV[view]);
     this.refreshMarkersScene();
     this.applyViewLimits(view);
     this.rig.setPose(pose, enableControls);
@@ -656,7 +665,7 @@ export class GalaxyRenderer {
 
     this.rig.update(now);
     this.updateFlight(now);
-    if (this.renderView === 'system') this.systemView?.updateFrame(this.elapsed);
+    if (this.renderView === 'system') this.systemView?.updateFrame(this.elapsed, this.rig.camera, this.height);
     else if (this.renderView === 'planet') this.planetView?.updateFrame(this.elapsed);
     this.updateMarkers();
 
@@ -666,6 +675,7 @@ export class GalaxyRenderer {
     const look = VIEW_LOOK[this.renderView];
     this.post.render(scene, this.rig.camera, {
       bloomStrength: look.bloom,
+      bloomThreshold: look.threshold,
       exposure: look.exposure,
       vignette: look.vignette,
     });

@@ -20,15 +20,18 @@ import type { CameraPose } from './camera';
 import { closePose } from './camera';
 import { screenRadiusPx } from './pick';
 import type { PickTarget, WorldPickable } from './api';
-import { planetViewMoonDistance, planetViewMoonRadius } from './scales';
+import { drawnRingRadii, planetViewMoonDistance, planetViewMoonRadius } from './scales';
 import { WorldVisual } from './world';
 import { createStarGlow } from './star';
 import { createStarfield, type SkyField } from './sky';
-import { TAU } from './rand';
+import { TAU, hashString } from './rand';
 
-const PLANET_VIEW_DISTANCE = 3.2;
-const RINGED_VIEW_DISTANCE = 4.3;
+/** How far the camera sits from the world on arrival, in planet radii, when unscaled. */
 const PORTAL_DISTANCE = 1.85;
+/** The phase angle of the default portrait: a gibbous three-quarter light. */
+const PHASE_DEG = 60;
+/** Preferred opening angle of a ring plane, degrees. */
+const RING_OPENING_DEG = 27;
 
 interface SkyMoon {
   readonly moonId: string;
@@ -46,6 +49,11 @@ export class PlanetView {
   readonly host: StarSystem;
   readonly starColor: THREE.Color;
   readonly starDirection = new THREE.Vector3(1, 0, 0);
+  /** Outer ring radius in world radii, or 1 when there are no rings. */
+  readonly ringOuter: number;
+  private readonly ringNormal = new THREE.Vector3(0, 1, 0);
+  private cameraDir: THREE.Vector3 | null = null;
+  private starDirectionLocked = false;
   private readonly visual: WorldVisual;
   private readonly moons: SkyMoon[] = [];
   private readonly sky: SkyField;
@@ -58,6 +66,16 @@ export class PlanetView {
     this.host = host;
     this.scene.background = new THREE.Color(0x000000);
     this.starColor = new THREE.Color(host.star.color[0], host.star.color[1], host.star.color[2]);
+    this.ringOuter = planet.rings
+      ? drawnRingRadii(
+          planet.rings.innerRadiusKm / Math.max(planet.radiusKm, 1),
+          planet.rings.outerRadiusKm / Math.max(planet.radiusKm, 1),
+        ).outer
+      : 1;
+    // The ring plane is tilted with the world (the same roll the surface rig applies), so
+    // the camera's opening angle is measured against the tilted normal.
+    const tilt = 0.16 + ((hashString(planet.id) % 1000) / 1000) * 0.34;
+    this.ringNormal.set(-Math.sin(tilt), Math.cos(tilt), 0).normalize();
 
     this.sky = createStarfield({
       count: 2600,
@@ -80,6 +98,7 @@ export class PlanetView {
       temperatureK: planet.temperatureK,
       id: planet.id,
       clouds: true,
+      lightBalance: 0.82,
     });
     this.scene.add(this.visual.group);
 
@@ -89,7 +108,7 @@ export class PlanetView {
       const visual = new WorldVisual({
         surface: moon.surface,
         radius,
-        detail: 'system',
+        detail: 'moon',
         atmosphere: moon.atmosphere,
         rings: null,
         coverage: moon.surface.colors.water ? 0.5 : 0,
@@ -97,6 +116,7 @@ export class PlanetView {
         temperatureK: null,
         id: moon.id,
         clouds: false,
+        lightBalance: 0.82,
       });
       this.scene.add(visual.group);
       this.moons.push({
@@ -120,11 +140,22 @@ export class PlanetView {
     this.setDpr(dpr);
   }
 
+  /**
+   * Advance the world's clock.
+   *
+   * The star's **direction** is captured once and then held: a planet view is a
+   * portrait, and letting the phase sweep as the simulation clock runs turns a composed
+   * gibbous world into a randomly lit one a few seconds later. (The surface still
+   * spins and the moons still orbit — the world is alive; only the light is held.)
+   */
   setTime(days: number): void {
-    const orbitPosition = positionAtAU(this.planet.orbit, days);
-    this.starDirection.set(-orbitPosition.x, -orbitPosition.y, -orbitPosition.z);
-    if (this.starDirection.lengthSq() < 1e-12) this.starDirection.set(1, 0, 0);
-    this.starDirection.normalize();
+    if (!this.starDirectionLocked) {
+      const orbitPosition = positionAtAU(this.planet.orbit, days);
+      this.starDirection.set(-orbitPosition.x, -orbitPosition.y, -orbitPosition.z);
+      if (this.starDirection.lengthSq() < 1e-12) this.starDirection.set(1, 0, 0);
+      this.starDirection.normalize();
+      if (days !== 0 || this.starDirection.lengthSq() > 0.5) this.starDirectionLocked = true;
+    }
 
     const dayHours = this.planet.dayHours;
     this.visual.setSpin(dayHours !== 0 ? (TAU * days * 24) / dayHours : 0);
@@ -155,12 +186,19 @@ export class PlanetView {
     this.starGlowMaterial.uniforms.uTime!.value = timeSeconds;
   }
 
-  /** Camera pose that lets the world fill the frame with a visible terminator. */
+  /**
+   * Camera pose that frames the world **and its rings**, with the terminator visible.
+   *
+   * The fit is an ellipse: the ring's projection is `outer` across and
+   * `outer · sin(opening)` up the screen. Nothing is allowed to be cut off — the
+   * previous frame's rings ran off both sides with a hard bar of shadow across the
+   * planet, which is what "over-dominant scale" meant.
+   */
   defaultPose(aspect: number, fovDeg: number): CameraPose {
     return closePose(
       new THREE.Vector3(0, 0, 0),
       this.cameraDirection(aspect, fovDeg),
-      this.planet.rings ? RINGED_VIEW_DISTANCE : PLANET_VIEW_DISTANCE,
+      this.framingDistance(aspect, fovDeg),
       0.01,
       4000,
     );
@@ -171,25 +209,37 @@ export class PlanetView {
     return closePose(new THREE.Vector3(0, 0, 0), this.cameraDirection(), PORTAL_DISTANCE, 0.01, 4000);
   }
 
+  private framingDistance(aspect: number, fovDeg: number): number {
+    const fovY = (fovDeg * Math.PI) / 180;
+    const tanY = Math.tan(fovY / 2);
+    const direction = this.cameraDirection(aspect, fovDeg);
+    const opening = Math.acos(Math.min(Math.max(direction.dot(this.ringNormal), -1), 1));
+    const outer = this.ringOuter;
+    const halfWidth = Math.max(1, outer) * 1.12;
+    const halfHeight = Math.max(1, outer * Math.sin(opening)) * 1.14;
+    const distanceH = halfWidth / (tanY * Math.max(aspect, 1e-4));
+    const distanceV = halfHeight / tanY;
+    return Math.max(distanceH, distanceV) * 1.04;
+  }
+
   /**
-   * Camera direction on the sphere of directions ~62° from the star: the classic
-   * gibbous three-quarter light, with the rings open.
+   * Camera direction on the cone of directions `PHASE_DEG` from the star — the classic
+   * gibbous three-quarter light.
    *
-   * Among those directions we look for one that also frames a moon in the sky: the
-   * moons ride `moonPositionKm`, so at any given time one of them may be behind the
-   * planet or outside the frame. Rotating the camera around the star-light direction
-   * costs nothing visually (the phase is unchanged) and is what makes "a moon or two
-   * visible as sky objects" a property of the default frame instead of luck. If no
-   * moon can be framed without a silly composition, the default direction is used.
+   * The azimuth around the star direction is free, and it is what sets the *ring
+   * opening* and which moon is in shot. We scan it: ringed worlds prefer an opening near
+   * 27° (open enough to see structure, closed enough to read as rings), and among the
+   * candidates that satisfy that, one with a moon in the sky wins.
    */
   private cameraDirection(aspect = 16 / 9, fovDeg = 50): THREE.Vector3 {
+    if (this.cameraDir) return this.cameraDir;
     const star = this.starDirection;
     const up = new THREE.Vector3(0, 1, 0);
     let side = new THREE.Vector3().crossVectors(star, up);
     if (side.lengthSq() < 1e-8) side = new THREE.Vector3(1, 0, 0);
     side.normalize();
     const lift = new THREE.Vector3().crossVectors(side, star).normalize();
-    const phaseAngle = (62 * Math.PI) / 180;
+    const phaseAngle = (PHASE_DEG * Math.PI) / 180;
     const toDirection = (phi: number): THREE.Vector3 =>
       star
         .clone()
@@ -198,47 +248,60 @@ export class PlanetView {
         .addScaledVector(lift, Math.sin(phi) * Math.sin(phaseAngle))
         .normalize();
 
-    const distance = this.planet.rings ? RINGED_VIEW_DISTANCE : PLANET_VIEW_DISTANCE;
-    if (this.moons.length > 0) {
-      const camera = new THREE.PerspectiveCamera(fovDeg, aspect, 0.01, 100);
-      camera.position.set(0, 0, distance);
-      camera.updateMatrixWorld(true);
-      const heightPx = 900;
-      const planetRadiusNdc = (screenRadiusPx(camera, new THREE.Vector3(), 1, heightPx) / heightPx) * 2;
-      const projected = new THREE.Vector3();
-      let best: { direction: THREE.Vector3; score: number } | null = null;
-      for (let step = 0; step < 120; step += 1) {
-        const direction = toDirection((step / 120) * Math.PI * 2);
-        if (direction.y < 0.08 || direction.y > 0.62) continue;
+    const targetOpening = (RING_OPENING_DEG * Math.PI) / 180;
+    const ringed = this.planet.rings !== null;
+    const distance = this.framingDistanceForScan(aspect, fovDeg);
+    const camera = new THREE.PerspectiveCamera(fovDeg, aspect, 0.01, 100);
+    const heightPx = 900;
+    const projected = new THREE.Vector3();
+    const planetRadiusNdc = (screenRadiusPx(camera, new THREE.Vector3(), 1, heightPx) / heightPx) * 2;
+
+    let best: { direction: THREE.Vector3; score: number } | null = null;
+    for (let step = 0; step < 180; step += 1) {
+      const direction = toDirection((step / 180) * Math.PI * 2);
+      // Keep the camera above the world's equator: a below-plane view of a ringed world
+      // hides its rings behind the planet.
+      if (direction.y < 0.10) continue;
+      let score = 0;
+      if (ringed) {
+        const opening = Math.acos(Math.min(Math.max(direction.dot(this.ringNormal), -1), 1));
+        score -= Math.abs(opening - targetOpening) * 2.2;
+      }
+      if (this.moons.length > 0) {
         camera.position.copy(direction).multiplyScalar(distance);
         camera.lookAt(0, 0, 0);
         camera.updateMatrixWorld(true);
-        let score = -1;
+        let moonBest = -1;
         for (const moon of this.moons) {
           projected.copy(moon.position).project(camera);
-          const ndcX = projected.x;
-          const ndcY = projected.y;
-          if (Math.abs(ndcX) > 0.9 || Math.abs(ndcY) > 0.9 || projected.z > 1) continue;
+          if (Math.abs(projected.x) > 0.9 || Math.abs(projected.y) > 0.9 || projected.z > 1) continue;
           const moonSizeNdc = (screenRadiusPx(camera, moon.position, moon.radius, heightPx) / heightPx) * 2;
           if (moonSizeNdc > 0.22) continue;
-          const fromCentre = Math.hypot(ndcX, ndcY);
-          if (fromCentre < planetRadiusNdc * 0.74 + moonSizeNdc) continue;
-          // Prefer a moon high in the sky, a little off the planet's limb.
-          const sky = Math.max(0, ndcY) * 0.6 + Math.min(fromCentre, 0.85) * 0.4;
-          score = Math.max(score, sky);
+          const fromCentre = Math.hypot(projected.x, projected.y);
+          if (fromCentre < planetRadiusNdc * 0.8 + moonSizeNdc) continue;
+          moonBest = Math.max(moonBest, Math.max(0, projected.y) * 0.6 + Math.min(fromCentre, 0.85) * 0.4);
         }
-        if (score > (best?.score ?? 0.02)) best = { direction, score };
+        if (moonBest > 0) score += 0.9 * moonBest;
       }
-      if (best) return best.direction;
+      if (!best || score > best.score) best = { direction, score };
     }
 
-    // Fallback: the side of the star with a little elevation.
-    const fallback = star
-      .clone()
-      .multiplyScalar(Math.cos(phaseAngle))
-      .addScaledVector(side, Math.sin(phaseAngle));
-    fallback.y += 0.31;
-    return fallback.normalize();
+    this.cameraDir = best
+      ? best.direction
+      : star
+          .clone()
+          .multiplyScalar(Math.cos(phaseAngle))
+          .addScaledVector(side, Math.sin(phaseAngle))
+          .setY(0.31)
+          .normalize();
+    return this.cameraDir;
+  }
+
+  /** Distance used only to score moon visibility while scanning for a direction. */
+  private framingDistanceForScan(aspect: number, fovDeg: number): number {
+    const fovY = (fovDeg * Math.PI) / 180;
+    const tanY = Math.tan(fovY / 2);
+    return Math.max(1, this.ringOuter) * 1.15 / (tanY * Math.max(Math.min(aspect, 1.0), 1e-4));
   }
 
   setDpr(dpr: number): void {

@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import type { Rgb } from '../sim/types';
 import { mulberry32, TAU } from './rand';
 import { GLSL_POINT } from './glsl';
 
@@ -23,6 +24,8 @@ export interface StarfieldOptions {
   readonly intensity?: number;
   /** CSS pixel size range. */
   readonly sizeRange?: readonly [number, number];
+  /** Overall colour of the field (linear RGB). Defaults to white. */
+  readonly tint?: Rgb;
   /** Camera near/far are per-view; the shell must be inside `far`. */
 }
 
@@ -134,13 +137,16 @@ export function createStarfield(opts: StarfieldOptions): SkyField {
   geometry.setAttribute('aBrightness', new THREE.BufferAttribute(brightness, 1));
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), opts.radius * 1.2);
 
+  const tintColor = new THREE.Color(1, 1, 1);
+  if (opts.tint) tintColor.setRGB(opts.tint[0], opts.tint[1], opts.tint[2]);
+
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms: {
       uDpr: { value: 1 },
       uIntensity: { value: opts.intensity ?? 0.55 },
-      uTint: { value: new THREE.Color(1, 1, 1) },
+      uTint: { value: tintColor.clone() },
     },
     blending: THREE.AdditiveBlending,
     depthTest: false,

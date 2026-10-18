@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import { AFFORDANCE, linear } from './palette';
 
 const VERT = /* glsl */ `
 attribute float aKind;
@@ -76,8 +77,8 @@ export class Markers {
         uDpr: { value: 1 },
         uHoverSize: { value: 26 },
         uSelectSize: { value: 40 },
-        uHoverColor: { value: new THREE.Color(0.55, 0.86, 1.0) },
-        uSelectColor: { value: new THREE.Color(1.0, 0.78, 0.42) },
+        uHoverColor: { value: linear(AFFORDANCE.hover) },
+        uSelectColor: { value: linear(AFFORDANCE.select) },
       },
       blending: THREE.AdditiveBlending,
       depthTest: false,
