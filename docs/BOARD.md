@@ -32,42 +32,34 @@ QUEUE | row=5 | visual QA: final frames at laptop and phone width, after polish 
 QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
 ```
 
-## State — verified, not believed (2026-10-18T19:54Z)
+## State — verified, not believed (2026-10-18T21:06Z)
 
 - **Remote:** `https://github.com/ArndRosemeier/Galaxy` — created by the owner, was
-  empty when wired (`git ls-remote --heads` printed nothing). Branch `main`.
+  empty when wired. Branch `main`, every landing pushed.
 - **Stack:** TypeScript 7.0.2 · Vite 8.3.4 · three 0.186.1 · Vitest 5.0.5 · pnpm
-  11.26.0 (shared store). Node 24.21.0.
-- **Gate:** `cheap = tsc --noEmit`, `full = vitest run && vite build`. Last run:
-  **GREEN, exit 0** — 7/7 tests, build 5 modules, raw log `.gate-logs/gate.log`.
-- **Visual harness:** `tools/shoot.mjs` verified end to end — headless Chrome +
-  SwiftShader WebGL2, screenshot captured and read back, page clean, Chrome tree
-  reaped (owner's 15-process browser untouched).
-- **Testability limit, stated:** SwiftShader cannot measure real-GPU frame rate.
-  Correctness and looks are verifiable here; fps is the owner's machine's business.
-
-- **Simulation landed** (`072fe7c`): default 180-system galaxy → 605 planets, 757
-  moons, 95 rings, 124 belts; spectral classes M 90 / K 40 / G 27 / F 14 / A 8 / B 1;
-  kinds gas 167 · desert 119 · ice 85 · barren 71 · icegiant 59 · toxic 50 · ocean 30 ·
-  terrestrial 15 · lava 9; 7 living worlds (4 microbial, 1 flora, 1 fauna, 1
-  civilization). Generation: 1.6 ms for 180 systems, 4.6 ms for 600.
-
-- **The interface landed** (`f7c9427`): an overlay legend (parameters, presets
-  filmstrip, seed + share), a dossier inspector with human units, a breadcrumb, a
-  transport dock, keyboard shortcuts and a phone bottom sheet. Driven by real mouse
-  events in QA, not by API calls.
-- **Verified frames so far:** galaxy reads as a spiral; the planet dossier is strong;
-  the **system view still frames the asteroid belt and loses its star** — the polish
-  slice (`feat/polish`) is fixing that now.
-
-- **Polish landed** (`6d596bc`): galaxy 8 draws / 42.9k points, system 28 draws, planet
-  12 draws; the disc reads as a photograph, the system has a visible star, the ocean
-  world fills the frame. My breadth survey (7 planet kinds, 900×600 and 390×844) then
-  found the planet view cropping worlds at non-16:10 aspects, rings dominating gas
-  giants, and overlapping bodies in wide-span systems — that is polish2.
-- **The overlay is accepted** (ledger 10): the panels sit over the scene, as a map's
-  legend does. The free band at 1440 is nearly centred (250 px left, 340 px right), so
-  a lens shift would buy ~45 px; insetting would shrink the subject.
+  11.26.0 (shared store) · Node 24.21.0.
+- **Gate:** `cheap = tsc --noEmit`, `full = vitest run && vite build`. Last run on
+  `main`: **GREEN, exit 0 — 15 test files / 117 tests**. Raw log `.gate-logs/gate.log`.
+- **Visual harness:** `tools/shoot.mjs` (headless Chrome + SwiftShader WebGL2, a
+  static server, real clicks/wheels/keys, console-error capture, process-group kill in
+  `finally`). `tools/qa.mjs` runs the scenario set and a real end-to-end click.
+- **Testability limit, stated:** software GL cannot measure real-GPU frame rate.
+  Correctness and looks are verified here; fps is the owner's machine's business.
+- **Generation** (`072fe7c`): default 180-system galaxy → 605 planets, 757 moons, 95
+  rings, 124 belts; spectral M 90 / K 40 / G 27 / F 14 / A 8 / B 1; kinds gas 167 ·
+  desert 119 · ice 85 · barren 71 · icegiant 59 · toxic 50 · ocean 30 · terrestrial 15
+  · lava 9; 7 living worlds (4 microbial, 1 flora, 1 fauna, 1 civilization).
+  Determinism: same params → identical SHA-256 across processes; 1.6 ms for 180
+  systems, 4.6 ms for 600.
+- **Interface** (`f7c9427`): overlay legend, preset filmstrip, seed + share link,
+  dossier inspector with human units, breadcrumb, transport dock, keyboard shortcuts,
+  phone bottom sheet. Driven by real mouse events in QA.
+- **Composition** (`6d596bc`): galaxy 8 draws / 42.9k points, system 28 draws, planet 12
+  draws. The disc reads as a photograph; the ocean world fills the frame.
+- **Open defects, assigned to `feat/polish2`:** planets crop at non-16:10 aspects,
+  rings dominate ringed giants, drawn planets overlap in wide-span systems.
+- **Overlay accepted** (ledger 10): panels sit over the scene; the free band at 1440 is
+  nearly centred, so a lens shift would buy ~45 px.
 
 ## Guards
 
