@@ -8,7 +8,7 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: 5c75da5 · 2026-10-18T19:40Z
+reconciled: 072fe7c · 2026-10-18T19:54Z
 
 SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=working autonomously — owner away
 
@@ -16,7 +16,8 @@ OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be her
 
 REQUEST | row=2 | A procedural galaxy creator in TS: planets, moons, asteroids, rings; zoom from the disc to a single world; detailed, pleasing, intuitive | src=ledger row 2 (owner's words verbatim)
 
-IN-FLIGHT | slice=sim | session=0e571d68-9bb7-45a7-8f4a-4e142bd2ac3d | worktree=/home/administrator/projects/Galaxy/worktrees/sim | branch=feat/sim | base=5c75da5 | state=writing | scope=src/sim/** (rng, noise, naming, galaxy, system, params, presets, index) + tests/sim/**; types.ts and orbit.ts frozen
+LANDED | slice=sim | sha=072fe7c | verify=MY OWN: gate exit 0 (8 files / 83 tests), my injection ×1.05 gravity reddened the NAMED gravity pin then restored to 8/8 green, my own cross-process SHA 87df6c64… matched and another seed f4de6ba0… differed | worktree and session retired; branch feat/sim deleted local+remote | docs=ledger 4,5; board | note=added optional SystemContext to the contract; a system cache must be cleared on regeneration
+retired_branch=feat/sim
 IN-FLIGHT | slice=renderer | session=8679b07f-696f-4779-9ca1-be76c3aa3bf1 | worktree=/home/administrator/projects/Galaxy/worktrees/renderer | branch=feat/render | base=5c75da5 | state=writing | scope=src/render/** + lab.html + dev fixtures; renders the frozen contract, generates nothing
 
 QUEUE | row=3 | integration: mount real generation + renderer in main.ts, app state, selection, three views, transitions | src=docs/ARCHITECTURE.md
@@ -25,7 +26,7 @@ QUEUE | row=5 | visual polish: deepen galaxy/system/planet frames against the ow
 QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
 ```
 
-## State — verified, not believed (2026-10-18T19:40Z)
+## State — verified, not believed (2026-10-18T19:54Z)
 
 - **Remote:** `https://github.com/ArndRosemeier/Galaxy` — created by the owner, was
   empty when wired (`git ls-remote --heads` printed nothing). Branch `main`.
@@ -38,6 +39,12 @@ QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, stat
   reaped (owner's 15-process browser untouched).
 - **Testability limit, stated:** SwiftShader cannot measure real-GPU frame rate.
   Correctness and looks are verifiable here; fps is the owner's machine's business.
+
+- **Simulation landed** (`072fe7c`): default 180-system galaxy → 605 planets, 757
+  moons, 95 rings, 124 belts; spectral classes M 90 / K 40 / G 27 / F 14 / A 8 / B 1;
+  kinds gas 167 · desert 119 · ice 85 · barren 71 · icegiant 59 · toxic 50 · ocean 30 ·
+  terrestrial 15 · lava 9; 7 living worlds (4 microbial, 1 flora, 1 fauna, 1
+  civilization). Generation: 1.6 ms for 180 systems, 4.6 ms for 600.
 
 ## Guards
 
