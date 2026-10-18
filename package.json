@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A procedural galaxy creator: stars, systems, planets, moons, rings and belts — generated from a seed, explorable from whole-galaxy scale down to a single world.",
+  "description": "A procedural galaxy creator: stars, systems, planets, moons, rings and belts \u2014 generated from a seed, explorable from whole-galaxy scale down to a single world.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "shoot": "node tools/shoot.mjs"
+    "shoot": "node tools/shoot.mjs",
+    "verify": "bash scripts/gate.sh && node tools/qa.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"
