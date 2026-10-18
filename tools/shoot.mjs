@@ -26,6 +26,7 @@
  *   --click <x,y>         left click at page coordinates (repeatable, in order)
  *   --wheel <x,y,dy>      wheel at page coordinates (repeatable, in order)
  *   --eval <js>           evaluate JS in the page after load (repeatable)
+ *   --print <js>          evaluate JS and include its value in the printed JSON
  *   --allow-errors        do not exit 1 on page errors (for deliberately broken pages)
  *
  * Exit codes: 0 = captured and the page was clean · 1 = captured but the page erred
@@ -70,6 +71,7 @@ for (let i = 0; i < argv.length; i += 1) {
     case '--click': opts.actions.push({ kind: 'click', value: next() }); break;
     case '--wheel': opts.actions.push({ kind: 'wheel', value: next() }); break;
     case '--eval': opts.actions.push({ kind: 'eval', value: next() }); break;
+    case '--print': opts.actions.push({ kind: 'print', value: next() }); break;
     case '--allow-errors': opts.allowErrors = true; break;
     case '--help': case '-h': usage(); process.exit(0); break;
     default: fail(`unknown flag ${a}`);
@@ -229,6 +231,7 @@ let chrome = null;
 let profileDir = '';
 const consoleErrors = [];
 const pageErrors = [];
+const prints = [];
 
 try {
   let targetUrl = opts.url;
@@ -302,13 +305,17 @@ try {
       } else if (action.kind === 'wheel') {
         const [x, y, dy] = action.value.split(',').map(Number);
         await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: dy });
-      } else if (action.kind === 'eval') {
+      } else if (action.kind === 'eval' || action.kind === 'print') {
         const r = await send('Runtime.evaluate', {
           expression: action.value,
           awaitPromise: true,
           returnByValue: true,
         });
-        if (r.exceptionDetails) pageErrors.push(String(r.exceptionDetails.exception?.description ?? ''));
+        if (r.exceptionDetails) {
+          pageErrors.push(String(r.exceptionDetails.exception?.description ?? ''));
+        } else if (action.kind === 'print') {
+          prints.push(r.result?.value);
+        }
       }
       await new Promise((r) => setTimeout(r, Math.max(150, opts.wait / 2)));
     }
@@ -329,6 +336,7 @@ try {
         url: targetUrl,
         consoleErrors,
         pageErrors,
+        prints,
       },
       null,
       2,
