@@ -32,7 +32,7 @@ landing.
 
 | n | statement | files | why | status |
 | ---: | --- | --- | --- | --- |
-| 1 | **Galaxy adopts the shared process on day 1, before any code exists** — owner, verbatim: *"please be my chief of staff"*. Evidence: `~/projects/Galaxy` was an empty, non-git directory at 2026-10-18T19:21Z (`ls -la`); the Toolbox scaffold is the upstream. Rejected: bootstrapping after the first feature, because every dispatch presupposes a record, a gate and a brief, and a session can die before that feature exists. Unproven: the stack and the first slice — the owner has not stated them. | `AGENTS.md`, `docs/BOARD.md`, `docs/BRIEF.md`, `scripts/gate.sh`, `scripts/board.sh` | a session death must be survivable from day 1 | LANDED PENDING |
+| 1 | **Galaxy adopts the shared process on day 1, before any code exists** — owner, verbatim: *"please be my chief of staff"*. Evidence: `~/projects/Galaxy` was an empty, non-git directory at 2026-10-18T19:21Z (`ls -la`); the Toolbox scaffold is the upstream. Rejected: bootstrapping after the first feature, because every dispatch presupposes a record, a gate and a brief, and a session can die before that feature exists. Unproven: the stack and the first slice — the owner has not stated them. | `AGENTS.md`, `docs/BOARD.md`, `docs/BRIEF.md`, `scripts/gate.sh`, `scripts/board.sh` | a session death must be survivable from day 1 | LANDED 8b5c254 |
 
 <!--
 Copy the row above for each new decision. Keep it to one row's worth of prose: the

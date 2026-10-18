@@ -8,7 +8,7 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: PENDING · 2026-10-18T19:23Z
+reconciled: 8b5c254 · 2026-10-18T19:26Z
 
 SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=idle — awaiting the owner's first work order
 
@@ -39,11 +39,14 @@ RECOVERY | repo=/home/administrator/projects/Galaxy | remote=NONE — not create
 
 - **`GUARD` — the suite lock.** `scripts/gate.sh` takes an atomic `mkdir` lock
   derived from the git common dir (one lock across every worktree); a second run is
-  refused with exit 9 and is VOID. Verify: run a full gate twice.
+  refused with exit 9 and is VOID. Verify: run a full gate twice. **Verified
+  2026-10-18:** two concurrent runs — first GREEN `exit 0`, second `exit 9` with
+  `REFUSED … VOID`, lock released by its owner afterwards.
 - **`GUARD` — the reconciler.** `scripts/board.sh` re-derives the remote sha, every
   claimed `LANDED` sha, the `reconciled:` marker and every `retired_branch=` claim,
   and reports `BOARD STALE` (exit 1) or `CANNOT LOOK` (exit 1) rather than passing
-  silently. Verify: run it after any record edit.
+  silently. Verify: run it after any record edit. **Verified 2026-10-18:** with no
+  remote it printed `CANNOT LOOK` and `exit 1`.
 
 ## Recovery pointers
 
@@ -66,3 +69,10 @@ RECOVERY | repo=/home/administrator/projects/Galaxy | remote=NONE — not create
 - `TRAP` — reaping `chrome` by pattern on this host kills the owner's GUI. The
   browser predates the session and is the operator's. Rule: audit only processes you
   started, by parent PID and start time; a browser you start dies in a `trap`.
+- `TRAP` — a check whose scaffolding failed reports a plausible-looking verdict.
+  Measured 2026-10-18, this session: the lock test redirected each run's output into
+  `.gate-logs/t1/out.txt` and `.gate-logs/t2/out.txt` before those directories
+  existed, so BOTH shells exited 1 without gate.sh ever running — two "RED" results
+  that were the harness's, not the gate's. Rule: prove the check RAN (its own banner
+  / log) before reading its exit code, and create a redirect target before
+  redirecting into it.
