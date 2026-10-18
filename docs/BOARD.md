@@ -8,9 +8,9 @@ The record vocabulary and the contract live in the upstream doc
 `/home/administrator/projects/Toolbox/docs/BOARD.md` — this file is the instance.
 
 ```
-reconciled: e996e67 · 2026-10-18T21:06Z
+reconciled: fa6b8ca · 2026-10-18T21:50Z
 
-SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=waiting on one writer (polish2)
+SESSION | id=session-f41732e8-880d-4c7b-8cf3-0a95aad20864 | model=deepseek-flash | state=publish verified — work complete
 
 OWNER | away for a long stretch, 2026-10-18T19:52Z, verbatim: "I will not be here for a long time. I trust you to do this to completion." | decision policy: the dispatcher decides a fork itself, records the choice AND the rejected option in the ledger, and surfaces the decision in the final report when the owner returns
 
@@ -26,10 +26,12 @@ LANDED | slice=ui | sha=f7c9427 | verify=MY OWN: gate exit 0 (15 files / 117 tes
 retired_branch=feat/ui
 LANDED | slice=polish | sha=6d596bc | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own frames of galaxy, system, ringed giant and an inhabited ocean world read | worktree and session retired; branch deleted local+remote | docs=ledger 9,10; board; ARCHITECTURE budget corrected | note=galaxy now reads as a photograph; ocean world fills the frame beautifully; my breadth survey found three NEW defects (planet crops at 900x600, rings dominate giants, planets overlap in wide-span systems)
 retired_branch=feat/polish
-IN-FLIGHT | slice=polish2 | session=e8c8e570-b7de-45ec-8ca7-1259fe7a9dc5 | worktree=/home/administrator/projects/Galaxy/worktrees/polish2 | branch=feat/polish2 | base=e996e67 | state=writing | scope=src/render/** — fix planet framing at any aspect, soften/cap rings, no overlapping bodies in the system view, star dominance
+LANDED | slice=polish2 | sha=edf07ef (cherry-picked from 9c1e7ba) | verify=MY OWN: gate exit 0 (15 files / 117 tests), my own frames at 1440x900 / 900x600 / 390x844 read, QA 9/9 clean | worktree and session retired; branch deleted local+remote | docs=ARCHITECTURE (screen-space ceilings); board | note=planet 10 draws / 36-46k tris; subject 58-60% of the shorter dimension at every aspect; rings soft and capped 2.6R; no body overlaps except true line-of-sight conjunctions
+retired_branch=feat/polish2
+LANDED | slice=ui-sheet-fix | sha=8047245 | verify=MY OWN: gate exit 0, phone and 900x600 frames read | dispatcher-owned | note=entering a world shows the world; the dossier sheet opens only when asked
+LANDED | slice=publish | sha=fa6b8ca | verify=CONTENT: public page serves the exact built asset assets/index-TPhQ_sse.js (HTTP 200, cf-cache-status DYNAMIC), local host 200 for page and asset | note=https://apps.futuremagic.de/galaxy/ is live; hub refreshed
 
-QUEUE | row=5 | visual QA: final frames at laptop and phone width, after polish and UI land | src=docs/TESTING.md
-QUEUE | row=6 | QA and publish: full gate, screenshots of every view, docs, static build reachable at a URL | src=docs/TESTING.md
+QUEUE | none — the request is delivered. Next owner message is the next work order.
 ```
 
 ## State — verified, not believed (2026-10-18T21:06Z)
