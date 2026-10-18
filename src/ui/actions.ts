@@ -6,14 +6,11 @@
  * fake app (see `tests/ui/actions.test.ts`).
  */
 
-import type { AppState, Selection } from '../app/state';
+import type { AppState } from '../app/state';
 import { DEFAULT_PARAMS, PARAM_SPECS, PRESETS } from '../sim';
 import type { GalaxyParams, GalaxyPreset, Planet } from '../sim/types';
 import { normalizeSeed } from './share';
 import type { UiActions } from './types';
-
-/** No selection at all — the shape `back()` returns to at galaxy scale. */
-export const NO_SELECTION: Selection = { systemId: null, planetId: null, moonId: null };
 
 /**
  * Open a planet's dossier. Selection is dispatched before the view change because the

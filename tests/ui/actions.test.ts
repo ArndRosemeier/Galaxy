@@ -4,7 +4,6 @@ import { INITIAL_STATE } from '../../src/app/state';
 import type { AppState, Selection } from '../../src/app/state';
 import { DEFAULT_PARAMS, PRESETS, clampParams, generateGalaxy, generateSystem } from '../../src/sim';
 import {
-  NO_SELECTION,
   activePresetId,
   applyPreset,
   commitSeed,
@@ -42,7 +41,7 @@ function createFakeApp(initial: AppState): FakeApp {
       current = {
         ...current,
         params: clampParams({ ...current.params, ...patch }),
-        selection: NO_SELECTION,
+        selection: { systemId: null, planetId: null, moonId: null },
         view: 'galaxy',
       };
     },
@@ -75,7 +74,11 @@ function createFakeApp(initial: AppState): FakeApp {
           selection: { ...current.selection, planetId: null, moonId: null },
         };
       } else if (current.view === 'system') {
-        current = { ...current, view: 'galaxy', selection: NO_SELECTION };
+        current = {
+          ...current,
+          view: 'galaxy',
+          selection: { systemId: null, planetId: null, moonId: null },
+        };
       }
     },
   };
@@ -143,7 +146,7 @@ describe('ui actions', () => {
     expect(fake.state.view).toBe('system');
     goToGalaxy(fake.app);
     expect(fake.state.view).toBe('galaxy');
-    expect(fake.state.selection).toEqual(NO_SELECTION);
+    expect(fake.state.selection).toEqual({ systemId: null, planetId: null, moonId: null });
   });
 
   it('applies a preset wholesale and recognises it again', () => {
