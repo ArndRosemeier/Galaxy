@@ -83,6 +83,27 @@ export interface GalaxyParams {
   readonly hazard: number;
 }
 
+/**
+ * The galaxy-level generation context of one system.
+ *
+ * Added to the frozen contract as an OPTIONAL field (nothing existing was changed):
+ * `generateSystem(stub)` is a pure function of its stub, and a system's worlds must
+ * still respond to the user's metallicity, age, life and hazard knobs. Rather than
+ * threading `GalaxyParams` through a signature the contract fixes, `generateGalaxy`
+ * stamps the resolved per-system context onto the stub. A stub authored by hand may
+ * omit it; generation then uses the documented default context.
+ */
+export interface SystemContext {
+  /** 0..1, already including the galaxy's per-system spread. */
+  readonly metallicity: number;
+  /** Gigayears. */
+  readonly ageGyr: number;
+  /** 0..1 life tendency, already including per-system spread. */
+  readonly lifeChance: number;
+  /** 0..1 debris/ring tendency, already including per-system spread. */
+  readonly hazard: number;
+}
+
 /** One star system as the galaxy map sees it: no planets are generated at this level. */
 export interface SystemStub {
   readonly id: string;
@@ -96,6 +117,11 @@ export interface SystemStub {
   readonly brightness: number;
   /** Stable per-system seed; `generateSystem(stub)` derives its worlds from it. */
   readonly seed: number;
+  /**
+   * Optional generation context (see `SystemContext`). `generateGalaxy` always fills
+   * it; `generateSystem` documents what it assumes when it is absent.
+   */
+  readonly context?: SystemContext;
 }
 
 /** The galaxy map. Systems are the only generated content here. */
